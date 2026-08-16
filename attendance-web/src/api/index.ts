@@ -1,0 +1,12 @@
+// Barrel xuất tất cả API namespace
+export { authApi } from './auth'
+export { attendanceApi } from './attendance'
+export { requestsApi, approvalsApi } from './requests'
+export { orgApi } from './org'
+export { shiftsApi } from './shifts'
+export { timesheetApi, payrollApi } from './timesheet'
+export { notificationsApi } from './notifications'
+export { dashboardApi } from './dashboard'
+export { delegationApi } from './delegation'
+export { regulationsApi, rolesApi, profileApi } from './config'
+export { auditApi } from './audit'
