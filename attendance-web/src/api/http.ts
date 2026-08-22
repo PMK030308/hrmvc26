@@ -20,13 +20,25 @@ export class ApiError extends Error {
   }
 }
 
+// Chuẩn hoá baseURL: luôn đảm bảo kết thúc bằng '/api'.
+//   - '/api'                              → '/api'        (dev, dùng Vite proxy)
+//   - 'https://...onrender.com'           → '.../api'     (env set thiếu /api)
+//   - 'https://...onrender.com/api'        → '.../api'     (env set đúng)
+//   - 'https://...onrender.com/api/'       → '.../api'     (có dấu / cuối)
+function apiBase(raw: string): string {
+  const clean = raw.replace(/\/+$/, '') // bỏ dấu / ở cuối
+  return clean.endsWith('/api') ? clean : `${clean}/api`
+}
+
+const RAW_BASE =
+  import.meta.env.VITE_API_URL ||
+  (import.meta.env.PROD ? 'https://hrm-attendance-api.onrender.com/api' : '/api')
+
 export const http = axios.create({
   // Dev: '/api' → Vite proxy → backend :4000 (xem vite.config.ts).
   // Production: ưu tiên env VITE_API_URL; nếu chưa set thì dùng backend Render thật.
   //   (Vite proxy KHÔNG chạy ở bản build tĩnh, nên '/api' sẽ 404 → phải có URL thật.)
-  baseURL:
-    import.meta.env.VITE_API_URL ||
-    (import.meta.env.PROD ? 'https://hrm-attendance-api.onrender.com/api' : '/api'),
+  baseURL: apiBase(RAW_BASE),
   timeout: 30_000,
 })
 
