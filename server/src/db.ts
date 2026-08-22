@@ -363,6 +363,29 @@ export function initSchema(): void {
   );
   CREATE INDEX IF NOT EXISTS idx_delegations_delegator ON delegations(delegator_user_id);
   CREATE INDEX IF NOT EXISTS idx_delegations_delegate ON delegations(delegate_user_id);
+
+  -- Khuôn mặt: descriptor 128-d (face-api) + ảnh tham chiếu (§5.6). 1 NV có 1 bản ghi.
+  CREATE TABLE IF NOT EXISTS employee_face_data (
+    id TEXT PRIMARY KEY,
+    employee_id TEXT NOT NULL UNIQUE,
+    descriptors TEXT NOT NULL,           -- JSON: number[][][] (mảng nhiều mẫu, mỗi mẫu 128-d)
+    photo_base64 TEXT,                    -- ảnh tham chiếu (base64) cho HR rà soát
+    captured_count INTEGER NOT NULL DEFAULT 0,
+    registered_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (employee_id) REFERENCES employees(id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_face_employee ON employee_face_data(employee_id);
+
+  -- Token phiên 1 lần cho /face/verify (chống replay). TTL 5 phút, dùng 1 lần.
+  CREATE TABLE IF NOT EXISTS face_attempt_tokens (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    token TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    used INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX IF NOT EXISTS idx_face_token ON face_attempt_tokens(token);
   `)
 
   // Cột thêm vào bảng đã có (idempotent — bỏ qua nếu cột đã tồn tại).
@@ -410,5 +433,6 @@ export function truncateAll(): void {
     DELETE FROM leave_types; DELETE FROM shifts; DELETE FROM delegations; DELETE FROM users; DELETE FROM employees;
     DELETE FROM positions; DELETE FROM departments; DELETE FROM branches;
     DELETE FROM holidays;
+    DELETE FROM face_attempt_tokens; DELETE FROM employee_face_data;
   `)
 }

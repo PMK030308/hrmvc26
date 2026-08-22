@@ -21,7 +21,10 @@ export class ApiError extends Error {
 }
 
 export const http = axios.create({
-  baseURL: '/api',
+  // Dev: '/api' → Vite proxy → backend :4000 (xem vite.config.ts).
+  // Production (Vercel): đặt env VITE_API_URL = https://<backend-cua-ban>/api
+  //   để frontend gọi thẳng backend thật (proxy Vite không chạy ở bản build).
+  baseURL: import.meta.env.VITE_API_URL ?? '/api',
   timeout: 30_000,
 })
 

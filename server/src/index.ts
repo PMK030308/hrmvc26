@@ -11,6 +11,7 @@ import { authRouter } from './routes/auth.js'
 import { orgRouter } from './routes/org.js'
 import { shiftsRouter } from './routes/shifts.js'
 import { attendanceRouter } from './routes/attendance.js'
+import { faceRouter } from './routes/face.js'
 import { requestsRouter, approvalsRouter } from './routes/requests.js'
 import { timesheetRouter, payrollRouter } from './routes/timesheet.js'
 import { notificationsRouter } from './routes/notifications.js'
@@ -31,6 +32,7 @@ app.use('/api/auth', authRouter)
 app.use('/api/org', orgRouter)
 app.use('/api/shifts', shiftsRouter)
 app.use('/api/attendance', attendanceRouter)
+app.use('/api/face', faceRouter)
 app.use('/api/requests', requestsRouter)
 app.use('/api/approvals', approvalsRouter)
 app.use('/api/timesheet', timesheetRouter)

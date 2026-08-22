@@ -300,10 +300,11 @@ function successResponse(rec: any, employeeId: string, date: string) {
     total += Math.max(0, (b - a) / 60)
   }
   const completed = rec?.checkInTime != null && rec?.checkOutTime != null
-  const nextAction = completed ? 'completed' : rec?.checkInTime == null ? 'check_in' : 'check_out'
+  const justCheckedIn = punches.length % 2 === 1 // lượt lẻ = vừa chấm VÀO
+  const nextAction = completed ? 'completed' : justCheckedIn ? 'check_out' : 'check_in'
   return {
     success: true,
-    message: completed ? 'Đã chấm ra. Chấm công hôm nay hoàn tất!' : rec?.checkInTime == null ? 'Chấm vào thành công!' : 'Chấm ra thành công!',
+    message: completed ? 'Đã chấm ra. Chấm công hôm nay hoàn tất!' : justCheckedIn ? 'Chấm vào thành công!' : 'Chấm ra thành công!',
     checkIn: rec?.checkInTime ?? null, checkOut: rec?.checkOutTime ?? null,
     totalPunches: punches.length, totalWorkHours: Math.round(total * 100) / 100, nextAction, completed,
   }

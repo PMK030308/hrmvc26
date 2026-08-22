@@ -3,6 +3,7 @@
 // Cung cấp hàm query tiện dụng cho routes & engines.
 // ============================================================================
 import { db } from './db.js'
+import { isoNow } from './lib/date.js'
 
 const json = (s: string | null | undefined, fallback: any = []) => {
   try { return s ? JSON.parse(s) : fallback } catch { return fallback }
@@ -285,4 +286,51 @@ export const getActiveDelegation = (delegatorUserId: string, today: string) => {
     `SELECT * FROM delegations WHERE delegator_user_id = ? AND is_active = 1 AND ? >= from_date AND ? <= to_date ORDER BY created_at DESC LIMIT 1`,
   ).get(delegatorUserId, today, today) as any
   return r ? mapDelegation(r) : null
+}
+
+/* ------------------------------ Khuôn mặt --------------------------------- */
+export function mapFaceData(r: any) {
+  return {
+    id: r.id, employeeId: r.employee_id, descriptors: json(r.descriptors, []),
+    photoBase64: str(r.photo_base64), capturedCount: r.captured_count,
+    registeredAt: r.registered_at, updatedAt: r.updated_at,
+  }
+}
+export const getFaceData = (employeeId: string) => {
+  const r = db.prepare('SELECT * FROM employee_face_data WHERE employee_id = ?').get(employeeId) as any
+  return r ? mapFaceData(r) : null
+}
+export function upsertFaceData(employeeId: string, descriptorsJson: string, photoBase64: string | null, count: number): void {
+  const now = isoNow()
+  const existing = db.prepare('SELECT id FROM employee_face_data WHERE employee_id = ?').get(employeeId) as any
+  if (existing) {
+    db.prepare('UPDATE employee_face_data SET descriptors=?, photo_base64=?, captured_count=?, updated_at=? WHERE id=?')
+      .run(descriptorsJson, photoBase64, count, now, existing.id)
+  } else {
+    db.prepare(`INSERT INTO employee_face_data (id, employee_id, descriptors, photo_base64, captured_count, registered_at, updated_at) VALUES (?,?,?,?,?,?,?)`)
+      .run(uid('face'), employeeId, descriptorsJson, photoBase64, count, now, now)
+  }
+}
+
+/* ------------------------- Token phiên chấm mặt -------------------------- */
+const ATTEMPT_TTL_MS = 5 * 60 * 1000 // 5 phút
+
+export function createAttemptToken(userId: string): { token: string; expiresAt: string } {
+  const token = uid('fat') + '-' + Math.random().toString(36).slice(2, 10)
+  const now = new Date()
+  const createdIso = isoNow()
+  db.prepare('INSERT INTO face_attempt_tokens (id, user_id, token, created_at, used) VALUES (?,?,?,?,0)').run(uid('fat'), userId, token, createdIso)
+  const expiresAt = new Date(now.getTime() + ATTEMPT_TTL_MS).toISOString()
+  return { token, expiresAt }
+}
+
+/** Lấy + đánh dấu dùng token. Trả về row nếu hợp lệ (chưa dùng, còn hạn). */
+export function consumeAttemptToken(token: string): { userId: string } | null {
+  const row = db.prepare('SELECT * FROM face_attempt_tokens WHERE token = ?').get(token) as any
+  if (!row) return null
+  if (row.used) return null
+  const age = Date.now() - new Date(row.created_at).getTime()
+  if (age > ATTEMPT_TTL_MS) return null
+  db.prepare('UPDATE face_attempt_tokens SET used = 1 WHERE id = ?').run(row.id)
+  return { userId: row.user_id }
 }

@@ -216,6 +216,36 @@ export interface AttendanceToday {
   shift: Shift | null
 }
 
+/* ----------------------------- Khuôn mặt ---------------------------------- */
+export interface FaceStatus {
+  registered: boolean
+  capturedCount: number
+  registeredAt: string | null
+}
+export interface FaceRegisterPayload {
+  /** Mảng nhiều mẫu, mỗi mẫu 128 số (descriptor 128-d). */
+  descriptors: number[][]
+  capturedCount: number
+  photoBase64?: string | null
+}
+export interface FaceAttempt {
+  token: string
+  expiresAt: string
+  requireLiveness: boolean
+  strictness: LivenessStrictness
+}
+export interface LivenessPayload {
+  landmarkVariance: number
+  blinkDetected: boolean
+  frameCount: number
+  snapshotBase64: string | null
+}
+export interface FaceVerifyPayload {
+  descriptor: number[]
+  liveness: LivenessPayload
+  token: string
+}
+
 export interface LeavePlanItem {
   date: string
   type: 'leave' | 'approved_leave'

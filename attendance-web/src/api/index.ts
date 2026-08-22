@@ -1,6 +1,7 @@
 // Barrel xuất tất cả API namespace
 export { authApi } from './auth'
 export { attendanceApi } from './attendance'
+export { faceApi } from './face'
 export { requestsApi, approvalsApi } from './requests'
 export { orgApi } from './org'
 export { shiftsApi } from './shifts'

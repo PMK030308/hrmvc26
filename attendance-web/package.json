@@ -3,15 +3,20 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "face-models": "node scripts/copy-face-models.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.9.0",
     "@tanstack/react-query": "^5.101.4",
+    "@vladmandic/face-api": "^1.7.15",
     "axios": "^1.19.0",
     "clsx": "^2.1.1",
     "date-fns": "^4.4.0",
