@@ -22,9 +22,11 @@ export class ApiError extends Error {
 
 export const http = axios.create({
   // Dev: '/api' → Vite proxy → backend :4000 (xem vite.config.ts).
-  // Production (Vercel): đặt env VITE_API_URL = https://<backend-cua-ban>/api
-  //   để frontend gọi thẳng backend thật (proxy Vite không chạy ở bản build).
-  baseURL: import.meta.env.VITE_API_URL ?? '/api',
+  // Production: ưu tiên env VITE_API_URL; nếu chưa set thì dùng backend Render thật.
+  //   (Vite proxy KHÔNG chạy ở bản build tĩnh, nên '/api' sẽ 404 → phải có URL thật.)
+  baseURL:
+    import.meta.env.VITE_API_URL ??
+    (import.meta.env.PROD ? 'https://hrm-attendance-api.onrender.com/api' : '/api'),
   timeout: 30_000,
 })
 

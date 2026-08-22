@@ -10,6 +10,10 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  // Tắt warning "chunk size > 500 kB" (face-api/recharts khá lớn) — chỉ là cảnh báo, không lỗi.
+  build: {
+    chunkSizeWarningLimit: 1500,
+  },
   server: {
     port: 5173,
     proxy: {
