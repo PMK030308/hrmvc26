@@ -25,7 +25,7 @@ export const http = axios.create({
   // Production: ưu tiên env VITE_API_URL; nếu chưa set thì dùng backend Render thật.
   //   (Vite proxy KHÔNG chạy ở bản build tĩnh, nên '/api' sẽ 404 → phải có URL thật.)
   baseURL:
-    import.meta.env.VITE_API_URL ??
+    import.meta.env.VITE_API_URL ||
     (import.meta.env.PROD ? 'https://hrm-attendance-api.onrender.com/api' : '/api'),
   timeout: 30_000,
 })
