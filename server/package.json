@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": "22.x"
+  },
   "description": "Backend HRM Chấm công — Express + SQLite",
   "scripts": {
     "dev": "tsx watch src/index.ts",

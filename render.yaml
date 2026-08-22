@@ -1,0 +1,24 @@
+# Render Blueprint — Backend HRM Chấm công (Express + better-sqlite3 + JWT)
+# Docs: https://render.com/docs/blueprint-spec
+#
+# Cách dùng:
+#   1. Đăng nhập https://dashboard.render.com
+#   2. New (góc phải) → Blueprint → chọn repo GitHub "PMK030308/hrmvc26"
+#   3. Render tự đọc file này và tạo service "hrm-attendance-api".
+# Lưu ý: gói "free" có filesystem ephemeral → dữ liệu SQLite reset khi redeploy
+# (seed tự chạy lại, đủ dùng cho demo). Muốn dữ liệu cố định cần nâng plan + attach Disk.
+services:
+  - type: web
+    name: hrm-attendance-api
+    runtime: node
+    rootDir: server
+    plan: free
+    buildCommand: npm install --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: JWT_SECRET
+        generateValue: true   # Render tự sinh secret ngẫu nhiên, không hardcode
