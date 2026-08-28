@@ -21,6 +21,8 @@ import {
 const GRACE_OVERNIGHT_MIN = 3 * 60
 const NIGHT_START = 22 * 60   // 22:00
 const NIGHT_END = 6 * 60      // 06:00
+// Máy chấm công vật lý ưu tiên: lượt web trong cửa sổ này sau 1 lượt máy → bị bỏ qua.
+const PHYSICAL_PRIORITY_SEC = 5 * 60
 
 function duplicateWindowSec(): number {
   const reg = getRegulation()
@@ -104,7 +106,25 @@ export function recomputeRecord(employeeId: string, date: string): any {
 
   if (!shift) {
     issues |= AttendanceIssue.NoShift
-    upsertRecord({ ...base, issues })
+    // Vẫn ghi giờ vào/ra + tổng giờ từ các lượt chấm (dù NV không có ca hôm nay —
+    // VD cuối tuần / chưa xếp ca) để UI (nút VÀO→RA, ô giờ vào/ra) cập nhật đúng.
+    if (punches.length > 0) {
+      const first = punches[0]!, last = punches[punches.length - 1]!
+      const isOpen = punches.length % 2 === 1
+      let totalWork = 0
+      for (let i = 0; i + 1 < punches.length; i += 2) {
+        totalWork += Math.max(0, (vnIsoToMinutes(punches[i + 1]!.punchedAt) - vnIsoToMinutes(punches[i]!.punchedAt)) / 60)
+      }
+      upsertRecord({
+        ...base,
+        check_in_time: minutesToTimeStr(vnIsoToMinutes(first.punchedAt) % 1440),
+        check_out_time: isOpen ? null : minutesToTimeStr(vnIsoToMinutes(last.punchedAt) % 1440),
+        actual_work_hours: Math.round(totalWork * 100) / 100,
+        main_status: 2, issues,
+      })
+    } else {
+      upsertRecord({ ...base, main_status: 2, issues })
+    }
     return recomputeRead(employeeId, date)
   }
 
@@ -215,7 +235,18 @@ function upsertRecord(r: any): void {
 /** Xử lý 1 lượt chấm công mới. */
 export function processPunch(
   employeeId: string, source: number,
-  payload: { latitude?: number; longitude?: number; accuracy?: number; wifiSsid?: string; notes?: string; snapshotBase64?: string | null; fixedPunchedAt?: string },
+  payload: { latitude?: number; longitude?: number; accuracy?: number; wifiSsid?: string; notes?: string; snapshotBase64?: string | null; fixedPunchedAt?: string; ipAddress?: string | null },
+): any {
+  // Bọc trong transaction: nếu recomputeRecord throw giữa chừng → rollback punch
+  // (không bỏ lẻ punch). better-sqlite3 đồng bộ + Node đơn luồng → các punch cùng
+  // lúc tự serialize, transaction đảm bảo atomicity.
+  const run = db.transaction(() => processPunchInner(employeeId, source, payload))
+  return run()
+}
+
+/** Thực thi 1 lượt chấm (bên trong transaction). */
+function processPunchInner(employeeId: string, source: number,
+  payload: { latitude?: number; longitude?: number; accuracy?: number; wifiSsid?: string; notes?: string; snapshotBase64?: string | null; fixedPunchedAt?: string; ipAddress?: string | null },
 ): any {
   // Mặc định dùng giờ VN hiện tại; máy chấm công vật lý có thể đẩy mốc giờ riêng (fixedPunchedAt, naive VN).
   let now: Date = nowVn()
@@ -233,6 +264,7 @@ export function processPunch(
     }
   }
   const dupWin = duplicateWindowSec()
+  augmentGpsNote(payload)
 
   // ---- Ca đêm qua 0h ----
   const yesterday = ymd(addDays(now, -1))
@@ -245,7 +277,7 @@ export function processPunch(
     if (open && nowMin >= endMin && nowMin <= endMin + GRACE_OVERNIGHT_MIN) {
       const last = yPunches[yPunches.length - 1]!
       if (secDiff(last.punchedAt, nowIso) < dupWin) return dupResponse()
-      insertPunch(employeeId, yesterday, nowIso, source, payload, false)
+      if (!insertPunch(employeeId, yesterday, nowIso, source, payload, false)) return dupResponse()
       const rec = recomputeRecord(employeeId, yesterday)
       return successResponse(rec, employeeId, yesterday)
     }
@@ -258,21 +290,73 @@ export function processPunch(
     if (secDiff(last.punchedAt, nowIso) < dupWin) return dupResponse()
   }
 
+  // ---- Mô hình 1 phiên/ngày: đã chấm VÀO+RA (số lượt chẵn >= 2) → không cho chấm lại.
+  // OT = chấm ra muộn (không cần phiên riêng); sửa giờ chấm = tạo đơn "Cập nhật công".
+  // Khớp với nút disable "Đã hoàn tất" ở UI (tránh engine cho phép mà UI chặn).
+  if (todayPunches.length >= 2 && todayPunches.length % 2 === 0) {
+    return {
+      success: false,
+      message: 'Hôm nay bạn đã chấm VÀO và RA hoàn tất. Nếu cần sửa giờ chấm, vui lòng tạo đơn "Cập nhật công" để quản lý duyệt.',
+      checkIn: null, checkOut: null, totalPunches: todayPunches.length,
+      totalWorkHours: 0, nextAction: 'completed', completed: true,
+    }
+  }
+
+  // ---- Máy chấm công vật lý ưu tiên (câu giảng viên) ----
+  // Nếu NV vừa chấm bằng máy vật lý (source=1) trong cửa sổ ưu tiên thì lượt web
+  // (source=2) bị bỏ qua: máy vật lý đáng tin hơn (không thể giả mạo như điện thoại),
+  // đồng thời tránh tạo lượt chấm thừa → ghép cặp VÀO/RA bị sai.
+  if (source === 2) {
+    for (const p of todayPunches) {
+      if (p.source === 1 && secDiff(p.punchedAt, nowIso) < PHYSICAL_PRIORITY_SEC) {
+        return {
+          success: false,
+          message: 'Bạn vừa chấm bằng máy chấm công vật lý — lượt chấm trên web bị bỏ qua (máy chấm công vật lý được ưu tiên theo quy định).',
+          checkIn: null, checkOut: null, totalPunches: 0, totalWorkHours: 0, nextAction: 'check_in', completed: false,
+        }
+      }
+    }
+  }
+
   const isCheckIn = todayPunches.length % 2 === 0
-  insertPunch(employeeId, date, nowIso, source, payload, isCheckIn)
+  if (!insertPunch(employeeId, date, nowIso, source, payload, isCheckIn)) return dupResponse()
   const rec = recomputeRecord(employeeId, date)
   return successResponse(rec, employeeId, date)
 }
 
+/** GPS warn-only: nếu có GPS + regulation bật GPS → kiểm tra khoảng cách tới các điểm
+ *  gps_catalog. Ngoài mọi bán kính → ghi cờ vào notes (KHÔNG chặn — NV có thể đang công tác). */
+function augmentGpsNote(payload: any): void {
+  if (payload.latitude == null || payload.longitude == null) return
+  const reg = getRegulation()
+  if (!reg?.enablePunchGps) return
+  const inside = (reg.gpsCatalog ?? []).some((g: any) => {
+    const R = 6371000 // bán kính Trái Đất (m)
+    const dLat = toRad(g.lat - payload.latitude)
+    const dLng = toRad(g.lng - payload.longitude)
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(payload.latitude)) * Math.cos(toRad(g.lat)) * Math.sin(dLng / 2) ** 2
+    const d = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+    return d <= (g.radiusMeters ?? 200)
+  })
+  if (!inside) {
+    const prev = payload.notes ? `${payload.notes} | ` : ''
+    payload.notes = `${prev}GPS ngoài văn phòng (cảnh báo, không chặn)`
+  }
+}
+function toRad(deg: number): number { return (deg * Math.PI) / 180 }
+
+/** Insert 1 punch. Trả về true nếu ghi thành công, false nếu trùng timestamp tuyệt đối
+ *  (ON CONFLICT DO NOTHING — chống 2 lượt cùng giây của cùng NV). */
 function insertPunch(employeeId: string, date: string, iso: string, source: number,
-  payload: any, isCheckIn: boolean): void {
+  payload: any, isCheckIn: boolean): boolean {
   const deviceInfo = source === 1 ? 'Máy chấm công' : 'Web'
-  db.prepare(`INSERT INTO punches (id, employee_id, date, punched_at, source, device_info, latitude, longitude,
-    accuracy, wifi_ssid, notes, snapshot_base64, attendance_record_id, is_check_in, is_active, created_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+  const info = db.prepare(`INSERT INTO punches (id, employee_id, date, punched_at, source, device_info, latitude, longitude,
+    accuracy, wifi_ssid, notes, snapshot_base64, attendance_record_id, is_check_in, is_active, created_at, ip_address)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(employee_id, date, punched_at) DO NOTHING`).run(
     uid('p'), employeeId, date, iso, source, deviceInfo, payload.latitude ?? null, payload.longitude ?? null,
     payload.accuracy ?? null, payload.wifiSsid ?? null, payload.notes ?? null, payload.snapshotBase64 ?? null,
-    null, isCheckIn ? 1 : 0, 1, iso)
+    null, isCheckIn ? 1 : 0, 1, iso, payload.ipAddress ?? null)
+  return info.changes > 0
 }
 
 function secDiff(aIso: string, bIso: string): number {

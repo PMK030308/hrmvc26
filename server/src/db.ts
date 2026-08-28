@@ -416,10 +416,14 @@ function addColumns(): void {
     `ALTER TABLE summary_timesheet_details ADD COLUMN night_ot_hours REAL NOT NULL DEFAULT 0`,
     `ALTER TABLE request_approvals ADD COLUMN on_behalf_of_user_id TEXT`,
     `ALTER TABLE request_approvals ADD COLUMN on_behalf_of_name TEXT`,
+    `ALTER TABLE punches ADD COLUMN ip_address TEXT`,
   ]
   for (const sql of alters) {
     try { db.exec(sql) } catch { /* cột đã tồn tại */ }
   }
+  // Chống trùng tuyệt đối: 1 NV không thể có 2 lượt chấm cùng giây (dedup cứng,
+  // bổ sung cho cửa sổ 60s trong engine). Seed dùng giờ unique/NV/ngày → không collide.
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_punches_emp_date_at ON punches(employee_id, date, punched_at)`)
 }
 
 /** Xoá toàn bộ dữ liệu (dùng cho reset-demo + reseed). Giữ schema. */

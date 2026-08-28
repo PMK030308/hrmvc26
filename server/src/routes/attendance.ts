@@ -13,6 +13,13 @@ attendanceRouter.post('/punch', requireAuth, (req: AuthedRequest, res, next) => 
   try {
     const emp = getEmployee(req.user!.employeeId)!
     const p = req.body ?? {}
+    // Chấm bằng khuôn mặt (source=1) BẮT BUỘC qua /api/face/verify (quét mặt thật + so khớp descriptor).
+    // Chặn chấm "source=Face" trực tiếp tại /punch để chống chấm hộ (không cần mặt thật).
+    if (p.source === 1) {
+      res.status(400).json({ status: 400, message: 'Chấm công bằng khuôn mặt phải quét mặt thật tại trang Chấm công khuôn mặt. Không được chấm trực tiếp.' })
+      return
+    }
+    p.ipAddress = clientIp(req)
     const result = processPunch(emp.id, p.source, p)
     pushAudit(req.user!.id, emp.fullName, 1, 'AttendancePunch', null, `Chấm công (${p.source}) — ${result.message}`)
     res.json(result)
@@ -30,13 +37,20 @@ attendanceRouter.post('/device-punch', (req, res, next) => {
     const emp = (db.prepare('SELECT * FROM employees WHERE employee_code=? AND status=2').get(employeeCode) as any)
     if (!emp) { res.status(404).json({ status: 404, message: `Không tìm thấy nhân viên ${employeeCode}.` }); return }
     // punchedAt do máy đẩy (ISO giờ VN); nếu không có thì để engine dùng nowVn()
-    const payload: any = { latitude, longitude, wifiSsid }
+    const payload: any = { latitude, longitude, wifiSsid, ipAddress: clientIp(req) }
     if (punchedAt) payload.fixedPunchedAt = punchedAt
     const result = processPunch(emp.id, 1, payload) // source=1 device (vật lý)
     pushAudit('device', `Máy chấm công #${employeeCode}`, 1, 'AttendancePunch', null, `Chấm công vật lý — ${result.message}`)
     res.json(result)
   } catch (e) { next(e) }
 })
+
+/** IP của client: ưu tiên X-Forwarded-For (sau proxy/Render), fallback req.ip. */
+function clientIp(req: any): string {
+  const xff = req.header('x-forwarded-for')
+  if (xff) return String(xff).split(',')[0]!.trim()
+  return req.ip ?? ''
+}
 
 attendanceRouter.get('/today', requireAuth, (req: AuthedRequest, res) => {
   const date = ymd(nowVn())
@@ -146,6 +160,12 @@ attendanceRouter.get('/punch-options', requireAuth, (_req, res) => {
 attendanceRouter.post('/proxy-punch', requireAuth, (req: AuthedRequest, res, next) => {
   try {
     const p = req.body ?? {}
+    // QL chấm hộ cũng không được dùng source=Face — khuôn mặt phải do NV tự quét hoặc qua máy vật lý.
+    if (p.source === 1) {
+      res.status(400).json({ status: 400, message: 'Không thể chấm hộ bằng khuôn mặt. Khuôn mặt phải do nhân viên tự quét.' })
+      return
+    }
+    p.ipAddress = clientIp(req)
     const result = proxyPunch(p.targetEmployeeId, p.source, p)
     const target = getEmployee(p.targetEmployeeId)
     pushAudit(req.user!.id, req.user!.email, 1, 'AttendancePunch', null, `Chấm công hộ ${target?.fullName ?? ''} — ${result.message}`)

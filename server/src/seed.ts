@@ -237,8 +237,9 @@ export function seed(): void {
       const id = `emp-${code.toLowerCase()}`
       const wage = Math.round((cfg.wageMin + rng() * (cfg.wageMax - cfg.wageMin)) * 1_000_000)
       const shiftKey = cfg.shifts[Math.floor(rng() * cfg.shifts.length)]!
-      // 60% NV dưới team lead, 40% dưới trưởng phòng
-      const mgr = rng() < 0.6 ? leads[i % leads.length]! : cfg.head
+      // 100% NV thường dưới trưởng nhóm (team lead); trưởng nhóm dưới trưởng phòng.
+      // → Chuỗi duyệt: NV → trưởng nhóm (DirectManager) → trưởng phòng (DepartmentHead) → GĐ.
+      const mgr = leads[i % leads.length]!
       const hireY = hireYears[Math.floor(rng() * 8)]
       const email = `${slug(fn)}.${slug(ln)}${codeSeq}@technova.vn`
       allEmps.push({ id, code, fn, ln, g, email, dept: cfg.id, pos: cfg.pos, mgr, wage, wn: shiftKey === 'office' ? 1 : 2, hire: `${hireY}-0${1 + Math.floor(rng() * 9)}-1${Math.floor(rng() * 9)}`, shift: SHIFT_BY_KEY[shiftKey], roles: ['Employee'] })

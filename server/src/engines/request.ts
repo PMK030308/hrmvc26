@@ -9,7 +9,7 @@ import { httpError } from '../types.js'
 import { uid, pushNotification } from '../helpers.js'
 import {
   getUserById, getUserByEmployeeId, getEmployee, getLeaveType, getRequest, allRequests,
-  getActiveDelegation,
+  getActiveDelegation, getRegulation,
 } from '../repo.js'
 import { recomputeRecord } from './attendance.js'
 import { workingDays, calendarDays, parseISO, isoNow, ymd, nowVn } from '../lib/date.js'
@@ -70,17 +70,20 @@ function resolveApprover(spec: ApproverSpec, employeeId: string): ResolvedApprov
   const emp = getEmployee(employeeId)
   let baseUserId: string | null = null
   let baseName = 'Quản lý'
+  let approverEmpId: string | null = null // employeeId của approver gốc (để check nghỉ phép)
   if (spec.kind === 'DirectManager') {
     const mgr = emp?.managerId ? getEmployee(emp.managerId) : null
     const u = mgr ? getUserByEmployeeId(mgr.id) : null
     baseUserId = u?.id ?? null
     baseName = mgr?.fullName ?? 'Quản lý trực tiếp'
+    approverEmpId = mgr?.id ?? null
   } else if (spec.kind === 'DepartmentHead') {
     const dept = db.prepare('SELECT * FROM departments WHERE id = ?').get(emp?.departmentId ?? '') as any
     const head = dept?.manager_employee_id ? getEmployee(dept.manager_employee_id) : null
     const u = head ? getUserByEmployeeId(head.id) : null
     baseUserId = u?.id ?? null
     baseName = head?.fullName ?? 'Trưởng phòng'
+    approverEmpId = head?.id ?? null
   } else if (spec.kind === 'Role') {
     const u = (db.prepare('SELECT * FROM users').all() as any[]).find((x) => JSON.parse(x.roles).includes(spec.role))
     const e = u ? getEmployee(u.employee_id) : null
@@ -90,7 +93,7 @@ function resolveApprover(spec: ApproverSpec, employeeId: string): ResolvedApprov
     baseUserId = spec.userId
     baseName = spec.name
   }
-  // Ủy quyền: nếu approver gốc đang vắng (có delegation active hôm nay) → chuyển sang delegate
+  // Ủy quyền tay: nếu approver gốc đang vắng (có delegation active hôm nay) → chuyển sang delegate
   const today = ymd(nowVn())
   if (baseUserId) {
     const dlg = getActiveDelegation(baseUserId, today)
@@ -106,7 +109,37 @@ function resolveApprover(spec: ApproverSpec, employeeId: string): ResolvedApprov
       }
     }
   }
+  // Escalation ngầm: approver gốc đang nghỉ phép (đơn leave approved hôm nay) và KHÔNG có
+  // ủy quyền tay → chuyển lên cấp trên kế tiếp để đơn không bị kẹt.
+  if (baseUserId && approverEmpId && isOnApprovedLeave(approverEmpId, today)) {
+    if (spec.kind === 'DepartmentHead') {
+      // Trưởng phòng nghỉ → Giám đốc duyệt.
+      const dir = findDirectorUser()
+      if (dir) return { userId: dir.id, name: `Giám đốc (thay mặt ${baseName})`, onBehalfOfUserId: baseUserId, onBehalfOfName: baseName }
+    } else if (spec.kind === 'DirectManager') {
+      // Trưởng nhóm nghỉ → Trưởng phòng duyệt.
+      const dept = db.prepare('SELECT * FROM departments WHERE id = ?').get(emp?.departmentId ?? '') as any
+      const head = dept?.manager_employee_id ? getEmployee(dept.manager_employee_id) : null
+      const hu = head ? getUserByEmployeeId(head.id) : null
+      if (hu) return { userId: hu.id, name: `${head?.fullName ?? 'Trưởng phòng'} (thay mặt ${baseName})`, onBehalfOfUserId: baseUserId, onBehalfOfName: baseName }
+    }
+  }
   return { userId: baseUserId, name: baseName }
+}
+
+/** NV này có đang nghỉ phép được duyệt trong ngày `today` không? */
+function isOnApprovedLeave(employeeId: string, today: string): boolean {
+  if (!employeeId) return false
+  const r = db.prepare(
+    `SELECT 1 FROM requests WHERE type='leaves' AND employee_id=? AND status=3 AND start_date<=? AND end_date>=? LIMIT 1`,
+  ).get(employeeId, today, today) as any
+  return !!r
+}
+
+/** Tìm user mang role Director (dùng khi escalate từ trưởng phòng). */
+function findDirectorUser(): { id: string; email: string } | null {
+  const u = (db.prepare('SELECT * FROM users').all() as any[]).find((x) => JSON.parse(x.roles).includes('Director'))
+  return u ? { id: u.id, email: u.email } : null
 }
 
 function evalCondition(cond: FlowStep['condition'], req: any): boolean {
@@ -169,6 +202,8 @@ export function createRequest(userId: string, type: RequestType, payload: any): 
     vals.push(payload.requestDate, payload.lateEarlyType, payload.requestedTime, payload.minutes, payload.reason)
   } else if (type === 'overtimes') {
     const totalHours = computeOtHours(payload.startTime, payload.endTime)
+    // Enforce cap OT theo luật (regulation.otMonthlyCapHours / otYearlyCapHours).
+    enforceOtCap(emp.id, payload.otDate, totalHours)
     cols.push('ot_date', 'start_time', 'end_time', 'total_hours', 'compensation_type', 'reason')
     vals.push(payload.otDate, payload.startTime, payload.endTime, totalHours, payload.compensationType, payload.reason)
   } else if (type === 'business-trips') {
@@ -251,6 +286,11 @@ export function approveRequest(userId: string, type: RequestType, id: string, co
       `${row.employee_name} — ${labelType(type)} (cấp ${nextLevel})${nap.onBehalfOfName ? ` (thay mặt ${nap.onBehalfOfName})` : ''}.`,
       6, 'request', id, `/employee/requests/${type}/${id}`)
   } else {
+    // Recheck cap OT lúc duyệt cuối (phòng trường hợp HR giảm cap sau khi đơn tạo).
+    if (type === 'overtimes') {
+      const otReq = getRequest(type, id) as any
+      enforceOtCap(otReq.employeeId, otReq.otDate, 0) // đơn đã nằm trong used → addHours=0
+    }
     db.prepare('UPDATE requests SET status=3, request_version=request_version+1, updated_at=? WHERE id=?').run(isoNow(), id)
     applyApprovedEffect(type, id)
     // Tham vấn Giám đốc: đơn nghỉ >3 ngày → thông báo (không chặn)
@@ -386,6 +426,40 @@ function computeOtHours(start: string, end: string): number {
   let mins = (eh * 60 + em) - (sh * 60 + sm)
   if (mins < 0) mins += 24 * 60
   return Math.round((mins / 60) * 100) / 100
+}
+
+/** Tổng giờ OT đã dùng (pending + approved) trong cùng tháng/năm với otDate.
+ *  Đếm status IN (2,3,8) để tránh tạo nhiều đơn rồi mới vượt cap. */
+export function otUsedHours(employeeId: string, otDate: string): { monthUsed: number; yearUsed: number } {
+  const ym = otDate.slice(0, 7) // YYYY-MM
+  const yy = otDate.slice(0, 4) // YYYY
+  const rows = db.prepare(
+    `SELECT ot_date, total_hours FROM requests WHERE type='overtimes' AND employee_id=? AND status IN (2,3,8)`,
+  ).all(employeeId) as any[]
+  let monthUsed = 0, yearUsed = 0
+  for (const r of rows) {
+    const d = String(r.ot_date ?? '')
+    if (d.startsWith(ym)) monthUsed += Number(r.total_hours ?? 0)
+    if (d.startsWith(yy)) yearUsed += Number(r.total_hours ?? 0)
+  }
+  return { monthUsed: Math.round(monthUsed * 100) / 100, yearUsed: Math.round(yearUsed * 100) / 100 }
+}
+
+/** Kiểm tra vượt hạn mức OT (tháng/năm) theo regulation. Ném 409 nếu vượt.
+ *  `addHours` = giờ của đơn đang tạo (0 khi recheck ở lúc duyệt — đơn đã nằm trong used). */
+function enforceOtCap(employeeId: string, otDate: string, addHours: number): void {
+  const reg = getRegulation()
+  const monthCap = reg?.otMonthlyCapHours ?? 40
+  const yearCap = reg?.otYearlyCapHours ?? 200
+  const { monthUsed, yearUsed } = otUsedHours(employeeId, otDate)
+  const monthAfter = Math.round((monthUsed + addHours) * 100) / 100
+  const yearAfter = Math.round((yearUsed + addHours) * 100) / 100
+  if (monthAfter > monthCap) {
+    throw httpError(409, `Vượt hạn mức làm thêm tháng: đã dùng ${monthUsed}h + đơn này ${addHours}h = ${monthAfter}h > ${monthCap}h/tháng (theo luật).`)
+  }
+  if (yearAfter > yearCap) {
+    throw httpError(409, `Vượt hạn mức làm thêm năm: đã dùng ${yearUsed}h + đơn này ${addHours}h = ${yearAfter}h > ${yearCap}h/năm (theo luật).`)
+  }
 }
 function payloadForType(type: RequestType, p: any): Record<string, any> {
   const allowed: Record<RequestType, string[]> = {

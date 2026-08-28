@@ -4,6 +4,8 @@
 import express from 'express'
 import cors from 'cors'
 import morgan from 'morgan'
+import { loadEnvFile } from './lib/env.js'
+loadEnvFile()
 import { initSchema, db } from './db.js'
 import { HttpError } from './types.js'
 import { seed } from './seed.js'
@@ -19,6 +21,7 @@ import { dashboardRouter } from './routes/dashboard.js'
 import { configRouter } from './routes/config.js'
 import { auditRouter } from './routes/audit.js'
 import { delegationRouter } from './routes/delegation.js'
+import { chatbotRouter } from './routes/chatbot.js'
 
 const app = express()
 const PORT = Number(process.env.PORT) || 4000
@@ -42,6 +45,7 @@ app.use('/api/dashboard', dashboardRouter)
 app.use('/api/config', configRouter)
 app.use('/api/audit', auditRouter)
 app.use('/api/delegation', delegationRouter)
+app.use('/api/chatbot', chatbotRouter)
 
 app.get('/api/health', (_req, res) => res.json({ ok: true, ts: new Date().toISOString() }))
 

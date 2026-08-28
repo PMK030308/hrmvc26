@@ -91,6 +91,7 @@ export function mapPunch(r: any) {
     accuracy: num(r.accuracy), wifiSsid: str(r.wifi_ssid), notes: str(r.notes),
     snapshotBase64: str(r.snapshot_base64), attendanceRecordId: str(r.attendance_record_id),
     isCheckIn: bool(r.is_check_in), isActive: bool(r.is_active), createdAt: r.created_at,
+    ipAddress: str(r.ip_address),
   }
 }
 export const punchesOfDay = (employeeId: string, date: string) =>

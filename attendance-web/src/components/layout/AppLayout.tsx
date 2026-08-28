@@ -9,6 +9,7 @@ import { useRealtime } from '@/hooks/useRealtime'
 import { ROLE_LABEL } from '@/constants/enums'
 import { Avatar } from '@/components/ui'
 import { NotificationBell } from './NotificationBell'
+import { ChatbotWidget } from '@/components/chatbot/ChatbotWidget'
 import { orgApi } from '@/api/org'
 import { useQuery } from '@tanstack/react-query'
 import { cn } from '@/lib/cn'
@@ -162,6 +163,8 @@ export function AppLayout() {
           })}
         </nav>
       </div>
+
+      <ChatbotWidget />
     </div>
   )
 }

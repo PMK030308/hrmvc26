@@ -9,9 +9,10 @@ import { httpError } from '../types.js'
 import { pushAudit } from '../helpers.js'
 import {
   createRequest, approveRequest, rejectRequest, cancelRequest, updateRequest,
-  partnerRespond, computeCapabilities, pendingApprovals,
+  partnerRespond, computeCapabilities, pendingApprovals, otUsedHours,
 } from '../engines/request.js'
-import { isoNow } from '../lib/date.js'
+import { isoNow, ymd, nowVn } from '../lib/date.js'
+import { getRegulation } from '../repo.js'
 
 const VALID_TYPES = ['leaves', 'late-earlies', 'overtimes', 'business-trips', 'shift-swaps', 'attendance-updates']
 
@@ -40,6 +41,18 @@ requestsRouter.get('/catalog', requireAuth, (req: AuthedRequest, res) => {
     attendanceUpdateTypes: [{ value: 1, label: 'Thêm bản ghi' }, { value: 2, label: 'Sửa giờ chấm' }, { value: 3, label: 'Xóa bản ghi' }],
     compensationTypes: [{ value: 1, label: 'Trả lương' }, { value: 2, label: 'Bù nghỉ' }, { value: 3, label: 'Lương + Bù' }],
     shiftSwapModes: [{ value: 1, label: 'Tự đổi ca (chỉ mình)' }, { value: 2, label: 'Đổi với đồng nghiệp' }],
+  })
+})
+
+// Tiến độ OT của NV hiện tại theo tháng/năm của `date` (cho form tạo đơn OT hiển thị cap).
+requestsRouter.get('/ot-usage', requireAuth, (req: AuthedRequest, res) => {
+  const date = String(req.query.date ?? ymd(nowVn()))
+  const reg = getRegulation()
+  const { monthUsed, yearUsed } = otUsedHours(req.user!.employeeId, date)
+  res.json({
+    date, monthUsed, yearUsed,
+    monthCap: reg?.otMonthlyCapHours ?? 40,
+    yearCap: reg?.otYearlyCapHours ?? 200,
   })
 })
 

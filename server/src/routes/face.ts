@@ -17,7 +17,9 @@ import { processPunch } from '../engines/attendance.js'
 
 export const faceRouter = Router()
 
-const MATCH_THRESHOLD = 0.6 // §5.6: Euclidean distance < 0.6
+// Ngưỡng khớp nới lỏng (0.6 → 0.7): cùng người đăng ký & chấm thường < 0.5, nhưng
+// góc/ánh sáng khác làm khoảng cách tăng → 0.7 cho phép rộng hơn, "chỉ cần có khuôn mặt thật".
+const MATCH_THRESHOLD = 0.7
 const DESCRIPTOR_DIM = 128
 
 /** Khoảng cách Euclidean giữa 2 descriptor (number[] | Float32Array). */
@@ -37,14 +39,15 @@ function isValidDescriptor(d: any): boolean {
   return true
 }
 
-/** Kiểm tra liveness theo mức strictness (§5.6). Trả về true nếu đạt. */
+/** Kiểm tra liveness theo mức strictness. Trả về true nếu đạt.
+ *  Chính sách "chỉ cần có khuôn mặt": phát hiện mặt trong đủ số khung là đạt —
+ *  blink/variance chỉ là gợi ý sống, KHÔNG bắt buộc (tránh fail oan khi đủ sáng nhưng
+ *  nháy mắt không rõ). Trước đây Standard cần ≥3 khung nhưng client chỉ chụp 2 → fail 100%. */
 function livenessOk(strictness: number, l: any): boolean {
   const frames = Number(l?.frameCount ?? 0)
-  const blink = !!l?.blinkDetected
-  const variance = Number(l?.landmarkVariance ?? 0)
-  if (strictness === 0) return frames >= 1                 // Lenient
-  if (strictness === 1) return frames >= 3 && (blink || variance > 0.01) // Standard
-  return frames >= 5 && blink && variance > 0.02            // Strict
+  // Strict (2): cần ≥2 khung có mặt; Lenient(0)/Standard(1): chỉ cần ≥1 khung có mặt.
+  const need = strictness >= 2 ? 2 : 1
+  return frames >= need
 }
 
 /* ------------------------------- /status ---------------------------------- */
@@ -88,7 +91,7 @@ faceRouter.get('/attempt', requireAuth, (req: AuthedRequest, res) => {
 /* ------------------------------- /verify ---------------------------------- */
 faceRouter.post('/verify', requireAuth, (req: AuthedRequest, res, next) => {
   try {
-    const { descriptor, liveness, token } = req.body ?? {}
+    const { descriptor, liveness, token, gps } = req.body ?? {}
     if (!token) throw httpError(400, 'Thiếu token phiên.')
     const consumed = consumeAttemptToken(token)
     if (!consumed) throw httpError(401, 'Token phiên không hợp lệ hoặc đã hết hạn.')
@@ -117,10 +120,21 @@ faceRouter.post('/verify', requireAuth, (req: AuthedRequest, res, next) => {
         throw httpError(400, 'Liveness check thất bại - cần khuôn mặt thật (nháy mắt / di chuyển nhẹ).')
     }
 
-    // Hợp lệ -> ghi lượt chấm công (source=1 Face).
+    // Hợp lệ -> ghi lượt chấm công (source=1 Face) + GPS + IP thiết bị người chấm.
     const snapshotBase64 = liveness?.snapshotBase64 ?? null
-    const result = processPunch(empId, 1, { snapshotBase64, notes: 'Face' })
+    const ipAddress = clientIp(req)
+    const result = processPunch(empId, 1, {
+      latitude: gps?.lat, longitude: gps?.lng, accuracy: gps?.accuracy,
+      ipAddress, snapshotBase64, notes: 'Face',
+    })
     pushAudit(req.user!.id, req.user!.email, 1, 'AttendancePunch', null, `Chấm công (Face) - ${result.message}`)
     res.json(result)
   } catch (e) { next(e) }
 })
+
+/** IP của client: ưu tiên X-Forwarded-For (sau proxy/Render), fallback req.ip. */
+function clientIp(req: any): string {
+  const xff = req.header('x-forwarded-for')
+  if (xff) return String(xff).split(',')[0]!.trim()
+  return req.ip ?? ''
+}
