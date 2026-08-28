@@ -42,9 +42,13 @@ export function usePunch() {
   const record = today.data?.record ?? null
   const punches = today.data?.punches ?? []
   const totalPunches = punches.length
-  const isCompleted = record?.checkInTime != null && record?.checkOutTime != null
+  // nextAction dựa trên CHẮN/LẺ số lượt chấm (source of truth mà engine processPunch
+  // dùng) — không phải checkInTime/checkOutTime (proxy, có thể lệch khi không ca).
+  // Mô hình 1 phiên/ngày: lượt chẵn (0,2,4...) = sắp check-in; lẻ = sắp check-out.
+  // Sau 1 phiên hoàn chỉnh (số lượt chẵn >= 2) → đã hoàn tất, không chấm lại (sửa = đơn cập nhật công).
+  const isCompleted = totalPunches >= 2 && totalPunches % 2 === 0
   const nextAction: 'check_in' | 'check_out' | 'completed' =
-    isCompleted ? 'completed' : record?.checkInTime == null ? 'check_in' : 'check_out'
+    isCompleted ? 'completed' : totalPunches % 2 === 0 ? 'check_in' : 'check_out'
 
   return {
     today, record, punches, totalPunches, isCompleted, nextAction,

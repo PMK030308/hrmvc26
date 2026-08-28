@@ -244,6 +244,8 @@ export interface FaceVerifyPayload {
   descriptor: number[]
   liveness: LivenessPayload
   token: string
+  /** GPS thiết bị người chấm (nếu được cấp quyền). */
+  gps?: { lat: number; lng: number; accuracy: number } | null
 }
 
 export interface LeavePlanItem {

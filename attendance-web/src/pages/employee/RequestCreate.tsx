@@ -6,7 +6,7 @@ import { toast } from 'sonner'
 import { requestsApi } from '@/api/requests'
 import { REQUEST_TYPE_LABEL, DAY_CALC_LABEL, LEAVE_CATEGORY_LABEL } from '@/constants/enums'
 import { workingDays, calendarDays, parseISO } from '@/lib/date'
-import { PageHeader, Card, CardHeader, CardBody, Input, Select, Textarea, Button, Spinner } from '@/components/ui'
+import { PageHeader, Card, CardHeader, CardBody, Input, Select, Textarea, Button, Spinner, ProgressBar } from '@/components/ui'
 import type { RequestType, LateEarlyType, AttendanceUpdateType, OvertimeCompensationType, ShiftSwapMode, LeaveType } from '@/types'
 
 const types: RequestType[] = ['leaves', 'late-earlies', 'overtimes', 'business-trips', 'shift-swaps', 'attendance-updates']
@@ -139,6 +139,16 @@ function OvertimeForm({ catalog, submitting, onSubmit }: { catalog: any; submitt
     let m = (eh * 60 + em) - (sh * 60 + sm); if (m < 0) m += 1440
     return Math.round((m / 60) * 100) / 100
   }, [startTime, endTime])
+  const { data: usage } = useQuery({
+    queryKey: ['request', 'ot-usage', otDate],
+    queryFn: () => requestsApi.otUsage(otDate),
+    enabled: !!otDate,
+  })
+  const monthProj = Math.round(((usage?.monthUsed ?? 0) + hours) * 100) / 100
+  const yearProj = Math.round(((usage?.yearUsed ?? 0) + hours) * 100) / 100
+  const overMonth = !!usage && monthProj > usage.monthCap
+  const overYear = !!usage && yearProj > usage.yearCap
+  const overCap = overMonth || overYear
   return (
     <Card>
       <CardHeader title="Đăng ký làm thêm (OT)" icon={<Clock3 className="h-4 w-4" />} />
@@ -149,11 +159,31 @@ function OvertimeForm({ catalog, submitting, onSubmit }: { catalog: any; submitt
           <Input label="Giờ kết thúc" type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} />
         </div>
         <p className="text-sm text-slate-600">Tổng giờ OT: <b className="text-brand-700">{hours}h</b>{hours > 4 && <span className="ml-2 text-xs text-warning-600">→ cần duyệt thêm HR</span>}</p>
+        {usage && (
+          <div className="space-y-3 rounded-lg bg-slate-50 p-3 text-xs">
+            <div>
+              <div className="mb-1 flex items-center justify-between text-slate-600">
+                <span>OT tháng (theo luật: tối đa {usage.monthCap}h)</span>
+                <span className={overMonth ? 'font-semibold text-danger-600' : 'text-slate-700'}>{usage.monthUsed}h + {hours}h = {monthProj}h</span>
+              </div>
+              <ProgressBar value={Math.min(100, (monthProj / usage.monthCap) * 100)} tone={overMonth ? 'danger' : monthProj / usage.monthCap > 0.8 ? 'warning' : 'success'} />
+            </div>
+            <div>
+              <div className="mb-1 flex items-center justify-between text-slate-600">
+                <span>OT năm (tối đa {usage.yearCap}h)</span>
+                <span className={overYear ? 'font-semibold text-danger-600' : 'text-slate-700'}>{usage.yearUsed}h + {hours}h = {yearProj}h</span>
+              </div>
+              <ProgressBar value={Math.min(100, (yearProj / usage.yearCap) * 100)} tone={overYear ? 'danger' : 'success'} />
+            </div>
+            {overCap && <p className="font-medium text-danger-600">Vượt hạn mức OT theo luật — không thể gửi đơn. Vui lòng giảm giờ hoặc chọn ngày khác.</p>}
+          </div>
+        )}
         <Select label="Hình thức bồi thường" value={compensationType} onChange={(e) => setCompensationType(Number(e.target.value) as OvertimeCompensationType)}>
           {catalog.compensationTypes.map((t: any) => <option key={t.value} value={t.value}>{t.label}</option>)}
         </Select>
         <Textarea label="Lý do" rows={3} value={reason} onChange={(e) => setReason(e.target.value)} />
-        <Button onClick={() => onSubmit({ otDate, startTime, endTime, totalHours: hours, compensationType, reason })} loading={submitting} className="w-full" icon={<Send className="h-4 w-4" />}>Gửi đơn OT ({hours}h)</Button>
+        <Button onClick={() => onSubmit({ otDate, startTime, endTime, totalHours: hours, compensationType, reason })}
+          loading={submitting} disabled={!otDate || overCap} className="w-full" icon={<Send className="h-4 w-4" />}>Gửi đơn OT ({hours}h)</Button>
       </CardBody>
     </Card>
   )

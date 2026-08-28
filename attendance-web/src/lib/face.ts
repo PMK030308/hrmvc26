@@ -21,7 +21,12 @@ export function loadFaceModels(): Promise<void> {
   return loadPromise
 }
 
-export const detectorOptions = new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 })
+// Detector chuẩn (đăng ký + vẽ khung): inputSize 224, ngưỡng thấp để detect dễ hơn,
+// mặt gần camera + đủ sáng là nhận được (giúp đăng ký mượt, không bị "không phát hiện khuôn mặt").
+export const detectorOptions = new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.4 })
+// Detector "nhanh" cho chấm công: dùng cùng inputSize 224 (không phải 160) để detect
+// đáng tin như khung vẽ — tránh "thấy khung nhưng chấm báo không phát hiện mặt".
+export const detectorOptionsFast = new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.3 })
 
 export interface DetectedFace {
   descriptor: Float32Array
@@ -33,6 +38,23 @@ export interface DetectedFace {
 export async function detectFace(input: HTMLVideoElement | HTMLImageElement | HTMLCanvasElement): Promise<DetectedFace | null> {
   const res = await faceapi
     .detectSingleFace(input, detectorOptions)
+    .withFaceLandmarks()
+    .withFaceDescriptor()
+  if (!res) return null
+  return {
+    descriptor: res.descriptor,
+    box: {
+      x: res.detection.box.x, y: res.detection.box.y,
+      width: res.detection.box.width, height: res.detection.box.height,
+    },
+    landmarks: res.landmarks,
+  }
+}
+
+/** Detect nhanh (inputSize 160) — cho luồng chấm công cần tốc độ. */
+export async function detectFaceFast(input: HTMLVideoElement | HTMLImageElement | HTMLCanvasElement): Promise<DetectedFace | null> {
+  const res = await faceapi
+    .detectSingleFace(input, detectorOptionsFast)
     .withFaceLandmarks()
     .withFaceDescriptor()
   if (!res) return null
@@ -66,15 +88,18 @@ export interface LivenessResult {
 }
 
 /**
- * Liveness thụ động: lấy `frames` khung cách nhau ~180ms, đo:
+ * Liveness thụ động: lấy `frames` khung cách nhau ~`frameIntervalMs`ms, đo:
  *  - landmarkVariance: tổng dịch chuyển mũi (điểm 30) giữa các khung (chống ảnh tĩnh).
  *  - blinkDetected: EAR dip dưới ngưỡng rồi hồi → nháy mắt.
  * Trả snapshotBase64 của khung cuối (cho HR rà soát).
+ * `detect` mặc định = detectFace; luồng nhanh có thể truyền detectFaceFast.
  */
 export async function computeLiveness(
   video: HTMLVideoElement,
-  opts: { frames: number; strictness: number },
+  opts: { frames: number; strictness: number; frameIntervalMs?: number; detect?: (input: HTMLVideoElement) => Promise<DetectedFace | null> },
 ): Promise<LivenessResult> {
+  const detect = opts.detect ?? detectFace
+  const interval = opts.frameIntervalMs ?? 90 // mặc định 90ms (nhanh hơn 180ms cũ)
   const frameCount = 0
   let prevNose: faceapi.Point | null = null
   let varianceSum = 0
@@ -83,7 +108,7 @@ export async function computeLiveness(
   let counted = 0
 
   for (let i = 0; i < opts.frames; i++) {
-    const det = await detectFace(video)
+    const det = await detect(video)
     if (det) {
       counted++
       const nose = det.landmarks.positions[30]! // đầu mũi (68-point)
@@ -104,7 +129,7 @@ export async function computeLiveness(
         lastSnap = c.toDataURL('image/jpeg', 0.7)
       } catch { lastSnap = null }
     }
-    if (i < opts.frames - 1) await sleep(180)
+    if (i < opts.frames - 1) await sleep(interval)
   }
 
   return {

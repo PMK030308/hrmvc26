@@ -75,6 +75,28 @@ export default function AdminShiftSchedule() {
         </div>
       </Card>
 
+      {/* Chú thích màu ca — khớp với ô màu trong bảng */}
+      {shifts && shifts.length > 0 && (
+        <Card className="mb-5 p-4">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-slate-600">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Chú thích màu ca</span>
+            {shifts.map((s) => (
+              <span key={s.id} className="inline-flex items-center gap-1.5">
+                <span className="grid h-5 w-5 place-items-center rounded-md text-[10px] font-bold text-white" style={{ background: s.color }}>
+                  {s.name.charAt(0)}
+                </span>
+                <span className="font-medium text-slate-700">{s.name}</span>
+                <span className="text-slate-400">({s.startTime.slice(0, 5)}–{s.endTime.slice(0, 5)}{s.isOvernight ? '+hôm sau' : ''})</span>
+              </span>
+            ))}
+            <span className="inline-flex items-center gap-1.5">
+              <span className="grid h-5 w-5 place-items-center rounded-md border border-slate-200 text-[10px] text-slate-300">·</span>
+              <span>Chưa phân ca</span>
+            </span>
+          </div>
+        </Card>
+      )}
+
       <Card>
         {isLoading ? <div className="p-5"><Spinner /></div> : employees.length === 0 ? <EmptyState icon={<CalendarRange className="h-6 w-6" />} title="Không có nhân viên" /> : (
           <div className="overflow-x-auto">

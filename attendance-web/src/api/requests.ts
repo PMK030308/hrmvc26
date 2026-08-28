@@ -13,6 +13,11 @@ export const requestsApi = {
 
   catalog(): Promise<RequestCatalog> { return api.get('/requests/catalog') },
 
+  /** Tiến độ OT (đã dùng/cap) theo tháng/năm của `date` — cho form OT hiển thị cap. */
+  otUsage(date: string): Promise<{ date: string; monthUsed: number; yearUsed: number; monthCap: number; yearCap: number }> {
+    return api.get('/requests/ot-usage', { date })
+  },
+
   list(type: RequestType): Promise<AnyRequest[]> { return api.get(`/requests/${type}`) },
 
   detail(type: RequestType, id: string): Promise<AnyRequest> { return api.get(`/requests/${type}/${id}`) },

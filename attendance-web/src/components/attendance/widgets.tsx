@@ -1,14 +1,18 @@
 // Widget chấm công: PunchCard, Summary30, RecentAttendance, StatusPill.
 import { motion } from 'framer-motion'
-import { Fingerprint, LogIn, LogOut, CheckCircle2, Clock3 } from 'lucide-react'
+import { useState } from 'react'
+import { Link } from 'react-router-dom'
+import { Fingerprint, LogIn, LogOut, CheckCircle2, Clock3, UserPlus } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { attendanceApi } from '@/api/attendance'
+import { faceApi } from '@/api/face'
 import { usePunch, useClock } from '@/hooks/usePunch'
 import { ATTENDANCE_STATUS_LABEL } from '@/constants/enums'
 import { fmtDate, fmtHours, fmtMinutes } from '@/lib/date'
 import { Badge, Button, Card, CardHeader, CardBody, Spinner, StatusBadge, EmptyState } from '@/components/ui'
-import type { PunchSource, AttendanceRecord } from '@/types'
+import type { AttendanceRecord } from '@/types'
 import { cn } from '@/lib/cn'
+import { FacePunchModal } from './FacePunchModal'
 
 /** Trạng thái chấm công hôm nay dạng pill. */
 export function PunchStatusPill({ record, totalPunches }: { record: AttendanceRecord | null; totalPunches: number }) {
@@ -22,17 +26,10 @@ export function PunchStatusPill({ record, totalPunches }: { record: AttendanceRe
 /** Thẻ chấm công lớn: đồng hồ + trạng thái + nút chấm. */
 export function PunchCard() {
   const clock = useClock()
-  const { record, punches, nextAction, doPunch, isPunching, isCompleted } = usePunch()
-  const { data: opts } = useQuery({ queryKey: ['punch-options'], queryFn: () => attendanceApi.punchOptions() })
-  const reg = opts?.regulation
-
-  const enabledSources: { src: PunchSource; label: string; emoji: string }[] = []
-  if (reg?.enablePunchFace) enabledSources.push({ src: 1, label: 'Khuôn mặt', emoji: '🙂' })
-  if (reg?.enablePunchGps) enabledSources.push({ src: 2, label: 'GPS', emoji: '📍' })
-  if (reg?.enablePunchWifi) enabledSources.push({ src: 3, label: 'Wi-Fi', emoji: '📶' })
-  if (reg?.enablePunchQr) enabledSources.push({ src: 4, label: 'QR', emoji: '🔳' })
-  if (reg?.enablePunchIp) enabledSources.push({ src: 5, label: 'IP', emoji: '🌐' })
-  const defaultSource = enabledSources[0]?.src ?? 99
+  const { record, punches, nextAction, isCompleted } = usePunch()
+  const [faceOpen, setFaceOpen] = useState(false)
+  const faceStatus = useQuery({ queryKey: ['face', 'status'], queryFn: () => faceApi.status() })
+  const registered = faceStatus.data?.registered ?? false
 
   const actionLabel = nextAction === 'check_in' ? 'Chấm VÀO' : nextAction === 'check_out' ? 'Chấm RA' : 'Đã hoàn tất'
   const actionIcon = nextAction === 'check_in' ? <LogIn className="h-6 w-6" /> : nextAction === 'check_out' ? <LogOut className="h-6 w-6" /> : <CheckCircle2 className="h-6 w-6" />
@@ -63,33 +60,31 @@ export function PunchCard() {
         </div>
       </div>
       <CardBody>
-        <Button onClick={() => doPunch(defaultSource, getLocation(defaultSource))} loading={isPunching} disabled={isCompleted}
-          size="lg" className="w-full" icon={actionIcon}>
-          {actionLabel} {defaultSource !== 99 ? `· ${enabledSources[0]?.label}` : ''}
-        </Button>
-        {enabledSources.length > 1 && (
-          <div className="mt-3 flex flex-wrap justify-center gap-1.5">
-            {enabledSources.slice(1).map((s) => (
-              <button key={s.src} onClick={() => doPunch(s.src, getLocation(s.src))} disabled={isCompleted}
-                className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600 transition hover:bg-brand-50 hover:text-brand-700 disabled:opacity-40">
-                {s.emoji} {s.label}
-              </button>
-            ))}
+        {isCompleted ? (
+          <Button disabled size="lg" className="w-full" icon={<CheckCircle2 className="h-6 w-6" />}>Đã hoàn tất chấm công hôm nay</Button>
+        ) : registered ? (
+          <Button onClick={() => setFaceOpen(true)} size="lg" className="w-full" icon={actionIcon}>
+            {actionLabel} · quét khuôn mặt
+          </Button>
+        ) : (
+          <div className="rounded-xl bg-warning-50 p-4 text-center">
+            <p className="text-sm font-medium text-warning-800">Bạn chưa đăng ký khuôn mặt</p>
+            <p className="mt-0.5 text-xs text-warning-700">Chấm công bắt buộc quét mặt thật — vui lòng đăng ký trước.</p>
+            <Link to="/employee/face-register" className="mt-3 inline-flex items-center gap-2 rounded-lg bg-warning-600 px-4 py-2 text-sm font-semibold text-white hover:bg-warning-700">
+              <UserPlus className="h-4 w-4" /> Đăng ký khuôn mặt
+            </Link>
           </div>
         )}
         {punches.length > 0 && (
           <p className="mt-3 text-center text-xs text-slate-400">Đã chấm {punches.length} lượt hôm nay · Tổng {fmtHours(record?.actualWorkHours ?? 0)}</p>
         )}
       </CardBody>
+      <FacePunchModal open={faceOpen} onClose={() => setFaceOpen(false)} nextAction={nextAction} onDone={() => setFaceOpen(false)} />
     </Card>
   )
 }
 
-function getLocation(src: PunchSource): { latitude?: number; longitude?: number; wifiSsid?: string } {
-  if (src === 2) return { latitude: 21.0137, longitude: 105.7982 }
-  if (src === 3) return { wifiSsid: 'TechNova-Office' }
-  return {}
-}
+
 
 /** Tổng hợp 30 ngày. */
 export function Summary30() {
@@ -149,19 +144,23 @@ export function RecentAttendance({ records }: { records: AttendanceRecord[] }) {
   )
 }
 
-/** Nút chấm nổi (mobile). */
+/** Nút chấm nổi (mobile) — mở quét khuôn mặt. */
 export function FloatingPunch() {
-  const { record, punches, nextAction, doPunch, isPunching, isCompleted } = usePunch()
+  const { record, punches, nextAction, isCompleted } = usePunch()
+  const [faceOpen, setFaceOpen] = useState(false)
   const label = nextAction === 'check_in' ? 'VÀO' : nextAction === 'check_out' ? 'RA' : 'OK'
   return (
-    <motion.button
-      onClick={() => doPunch(99)} disabled={isCompleted || isPunching}
-      whileTap={{ scale: 0.9 }}
-      className={cn('fixed bottom-20 right-4 z-20 grid h-16 w-16 place-items-center rounded-full text-white shadow-pop lg:hidden',
-        isCompleted ? 'bg-success-600' : nextAction === 'check_out' ? 'bg-warning-600' : 'bg-brand-600')}>
-      {!isCompleted && <span className="absolute inset-0 animate-pulse-ring rounded-full bg-brand-400/40" />}
-      <span className="relative text-sm font-bold">{label}</span>
-      {void record}{void punches}
-    </motion.button>
+    <>
+      <motion.button
+        onClick={() => setFaceOpen(true)} disabled={isCompleted}
+        whileTap={{ scale: 0.9 }}
+        className={cn('fixed bottom-20 right-4 z-20 grid h-16 w-16 place-items-center rounded-full text-white shadow-pop lg:hidden',
+          isCompleted ? 'bg-success-600' : nextAction === 'check_out' ? 'bg-warning-600' : 'bg-brand-600')}>
+        {!isCompleted && <span className="absolute inset-0 animate-pulse-ring rounded-full bg-brand-400/40" />}
+        <span className="relative text-sm font-bold">{label}</span>
+        {void record}{void punches}
+      </motion.button>
+      <FacePunchModal open={faceOpen} onClose={() => setFaceOpen(false)} nextAction={nextAction} onDone={() => setFaceOpen(false)} />
+    </>
   )
 }

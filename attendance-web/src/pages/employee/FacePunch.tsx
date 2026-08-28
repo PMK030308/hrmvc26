@@ -4,7 +4,7 @@ import { ScanFace, Camera, Fingerprint, CheckCircle2, UserPlus } from 'lucide-re
 import { toast } from 'sonner'
 import { Link } from 'react-router-dom'
 import { faceApi } from '@/api/face'
-import { loadFaceModels, detectFace, computeLiveness } from '@/lib/face'
+import { loadFaceModels, detectFace, detectFaceFast, computeLiveness } from '@/lib/face'
 import type { FaceAttempt, LivenessPayload, PunchResponse } from '@/types'
 import { Card, CardBody, PageHeader, Button, Spinner, Badge } from '@/components/ui'
 import { fmtTime } from '@/lib/date'
@@ -18,6 +18,7 @@ export default function FacePunchPage() {
   const [modelError, setModelError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [attempt, setAttempt] = useState<FaceAttempt | null>(null)
+  const [gpsState, setGpsState] = useState<'idle' | 'ok' | 'off'>('idle')
   const qc = useQueryClient()
 
   const status = useQuery({ queryKey: ['face', 'status'], queryFn: () => faceApi.status() })
@@ -63,6 +64,18 @@ export default function FacePunchPage() {
 
   useEffect(() => () => { streamRef.current?.getTracks().forEach((t) => t.stop()) }, [])
 
+  // Xin vị trí GPS (warn-only: không chặn nếu từ chối/out-of-office — NV có thể đang công tác).
+  function getPosition(): Promise<{ lat: number; lng: number; accuracy: number } | null> {
+    return new Promise((resolve) => {
+      if (!('geolocation' in navigator)) { setGpsState('off'); resolve(null); return }
+      navigator.geolocation.getCurrentPosition(
+        (pos) => { setGpsState('ok'); resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy }) },
+        () => { setGpsState('off'); resolve(null) },
+        { enableHighAccuracy: true, timeout: 5000, maximumAge: 60_000 },
+      )
+    })
+  }
+
   // Xin token (1 lần) rồi verify ngay — tránh stale closure của `attempt`.
   async function doPunchFixed() {
     setBusy(true)
@@ -71,19 +84,21 @@ export default function FacePunchPage() {
       if (!v) { toast.error('Camera chưa sẵn sàng.'); return }
       const a = await faceApi.attempt()
       setAttempt(a)
-      const det = await detectFace(v)
+      const det = await detectFaceFast(v)
       if (!det) { toast.error('Không phát hiện khuôn mặt. Đặt mặt thẳng vào khung.'); return }
       let liveness: LivenessPayload = { landmarkVariance: 0, blinkDetected: false, frameCount: 1, snapshotBase64: null }
       if (a.requireLiveness) {
-        const frames = a.strictness === 2 ? 6 : a.strictness === 1 ? 4 : 1
+        // Liveness NHANH: strictness 2→4 frame, 1→2 frame, 0→1 frame; interval 90ms.
+        const frames = a.strictness === 2 ? 4 : a.strictness === 1 ? 2 : 1
         toast.info(`Đang kiểm tra liveness (${frames} khung)...`)
-        liveness = await computeLiveness(v, { frames, strictness: a.strictness })
+        liveness = await computeLiveness(v, { frames, strictness: a.strictness, frameIntervalMs: 90, detect: detectFaceFast })
       } else {
         const c = document.createElement('canvas'); c.width = 320; c.height = 240
         c.getContext('2d')!.drawImage(v, 0, 0, 320, 240)
         liveness.snapshotBase64 = c.toDataURL('image/jpeg', 0.7)
       }
-      const res = await faceApi.verify({ descriptor: Array.from(det.descriptor), liveness, token: a.token })
+      const gps = await getPosition()
+      const res = await faceApi.verify({ descriptor: Array.from(det.descriptor), liveness, token: a.token, gps })
       if (res.success) toast.success(res.message); else toast.warning(res.message)
       qc.invalidateQueries({ queryKey: ['attendance', 'today'] })
       qc.invalidateQueries({ queryKey: ['employee', 'dashboard'] })
@@ -128,6 +143,9 @@ export default function FacePunchPage() {
               {cameraOn && !busy && <Button onClick={doPunchFixed} icon={<Fingerprint className="h-4 w-4" />}>Chấm công</Button>}
               {busy && <Button loading>Đang nhận diện...</Button>}
             </div>
+            <p className="mt-2 text-center text-xs text-slate-500">
+              {gpsState === 'ok' ? '📍 Đã ghi GPS vị trí chấm công' : gpsState === 'off' ? '📍 GPS tắt — chấm vẫn hợp lệ (có thể đang công tác)' : '📍 Sẽ xin GPS khi bấm chấm công'}
+            </p>
           </CardBody>
         </Card>
         <Card>

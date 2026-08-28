@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Calendar, MapPin, Wifi, Fingerprint, Globe, QrCode, Clock3 } from 'lucide-react'
 import { attendanceApi } from '@/api/attendance'
 import { PUNCH_SOURCE_LABEL, ATTENDANCE_STATUS_LABEL } from '@/constants/enums'
-import { fmtDate, fmtTime, toVnDate } from '@/lib/date'
+import { fmtDate, fmtTime } from '@/lib/date'
 import { Card, CardHeader, CardBody, PageHeader, Tabs, StatusBadge, Badge, EmptyState, Spinner } from '@/components/ui'
 import { PunchCard, FloatingPunch, Summary30 } from '@/components/attendance/widgets'
 import { cn } from '@/lib/cn'
@@ -85,7 +85,7 @@ function TodayView() {
                       <p className="text-xs text-slate-500"><Badge tone={meta.tone}>{meta.label}</Badge> {p.wifiSsid && `· ${p.wifiSsid}`} {(p.latitude != null) && '· GPS'}</p>
                     </div>
                     <div className="text-right">
-                      <p className="font-mono text-sm font-semibold text-slate-800">{fmtTime(toVnDate(p.punchedAt))}</p>
+                      <p className="font-mono text-sm font-semibold text-slate-800">{fmtTime(p.punchedAt)}</p>
                       <p className="text-[10px] text-slate-400">{fmtDate(p.punchedAt, 'dd/MM/yyyy')}</p>
                     </div>
                   </li>
