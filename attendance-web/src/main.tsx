@@ -4,6 +4,10 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Toaster } from 'sonner'
 import App from './App'
 import './index.css'
+import { watchSystemTheme } from './lib/theme'
+import { useUIStore } from './stores/uiStore'
+
+watchSystemTheme(() => useUIStore.getState().theme)
 
 const queryClient = new QueryClient({
   defaultOptions: {

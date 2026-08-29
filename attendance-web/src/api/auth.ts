@@ -20,4 +20,7 @@ export const authApi = {
   forgotPassword(email: string): Promise<{ ok: true; message: string }> {
     return api.post('/auth/forgot-password', { email })
   },
+  changePassword(payload: { currentPassword: string; newPassword: string; confirmPassword: string }): Promise<{ ok: true }> {
+    return api.put('/auth/change-password', payload)
+  },
 }

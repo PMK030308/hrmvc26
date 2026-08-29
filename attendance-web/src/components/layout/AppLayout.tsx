@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { NavLink, useLocation, useNavigate, Outlet } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Menu, X, LogOut, ChevronDown, Fingerprint } from 'lucide-react'
+import { Menu, X, LogOut, ChevronDown, ChevronUp, Fingerprint, UserRound, Bell, Sun, Moon, Monitor } from 'lucide-react'
 import { navForRoles, homeForRoles, type NavItem } from './nav'
 import { useAuthStore } from '@/stores/authStore'
 import { useUIStore } from '@/stores/uiStore'
@@ -29,11 +29,13 @@ function SidebarItem({ item, onNav }: { item: NavItem; onNav?: () => void }) {
   )
 }
 
-function UserMenu() {
+function UserMenu({ placement = 'topbar' }: { placement?: 'sidebar' | 'topbar' }) {
   const [open, setOpen] = useState(false)
   const user = useAuthStore((s) => s.user)!
   const logout = useAuthStore((s) => s.logout)
   const navigate = useNavigate()
+  const theme = useUIStore((s) => s.theme)
+  const setTheme = useUIStore((s) => s.setTheme)
   const { data: emp } = useQuery({
     queryKey: ['me-employee'],
     queryFn: () => orgApi.employee(user.employeeId),
@@ -42,19 +44,25 @@ function UserMenu() {
   const roleLabel = user.roles.map((r) => ROLE_LABEL[r].label).join(', ')
 
   return (
-    <div className="relative">
-      <button onClick={() => setOpen((o) => !o)} className="flex items-center gap-2 rounded-lg p-1.5 hover:bg-slate-100">
+    <div className={cn('relative', placement === 'sidebar' && 'w-full')}>
+      <button onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-haspopup="menu"
+        className={cn('flex items-center gap-2 rounded-lg p-1.5 transition hover:bg-slate-100', placement === 'sidebar' && 'w-full px-2 py-2')}>
         <Avatar name={emp?.fullName ?? user.email} src={emp?.avatarData} size="sm" />
         <div className="hidden text-left sm:block">
           <p className="max-w-[140px] truncate text-xs font-semibold text-slate-800">{emp?.fullName ?? user.email}</p>
           <p className="text-[10px] text-slate-500">{roleLabel}</p>
         </div>
-        <ChevronDown className="hidden h-4 w-4 text-slate-400 sm:block" />
+        {placement === 'sidebar'
+          ? <ChevronUp className={cn('ml-auto h-4 w-4 text-slate-400 transition-transform', open && 'rotate-180')} />
+          : <ChevronDown className={cn('hidden h-4 w-4 text-slate-400 transition-transform sm:block', open && 'rotate-180')} />}
       </button>
       {open && (
         <>
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 z-40 mt-2 w-56 rounded-xl bg-white p-1.5 shadow-pop ring-1 ring-slate-200">
+          <div role="menu" className={cn(
+            'absolute right-0 z-40 w-56 rounded-xl bg-white p-1.5 shadow-pop ring-1 ring-slate-200',
+            placement === 'sidebar' ? 'bottom-full mb-2' : 'top-full mt-2',
+          )}>
             <div className="border-b border-slate-100 px-3 py-2">
               <p className="text-sm font-semibold text-slate-800">{emp?.fullName ?? user.email}</p>
               <p className="text-xs text-slate-500">{user.email}</p>
@@ -63,6 +71,27 @@ function UserMenu() {
               className="mt-1 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-600 hover:bg-slate-100">
               <Fingerprint className="h-4 w-4" /> Trang chủ
             </button>
+            <button onClick={() => { navigate('/employee/profile'); setOpen(false) }}
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-600 hover:bg-slate-100">
+              <UserRound className="h-4 w-4" /> Hồ sơ tài khoản
+            </button>
+            <button onClick={() => { navigate('/employee/notifications'); setOpen(false) }}
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-600 hover:bg-slate-100">
+              <Bell className="h-4 w-4" /> Thông báo
+            </button>
+            <div className="my-1 border-y border-slate-100 px-2 py-2.5">
+              <p className="mb-2 px-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Giao diện</p>
+              <div className="grid grid-cols-3 gap-1">
+                {([
+                  { value: 'light' as const, label: 'Sáng', icon: Sun },
+                  { value: 'dark' as const, label: 'Tối', icon: Moon },
+                  { value: 'system' as const, label: 'Máy', icon: Monitor },
+                ]).map((item) => <button key={item.value} type="button" onClick={() => setTheme(item.value)} title={item.value === 'system' ? 'Theo giao diện Windows' : item.label}
+                  className={cn('flex flex-col items-center gap-1 rounded-lg px-1 py-2 text-[10px] font-medium transition', theme === item.value ? 'bg-brand-50 text-brand-700 ring-1 ring-brand-100' : 'text-slate-500 hover:bg-slate-100')}>
+                  <item.icon className="h-4 w-4" />{item.label}
+                </button>)}
+              </div>
+            </div>
             <button onClick={() => { logout(); navigate('/login') }}
               className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-danger-600 hover:bg-danger-50">
               <LogOut className="h-4 w-4" /> Đăng xuất
@@ -101,7 +130,7 @@ export function AppLayout() {
         <nav className="flex-1 space-y-1 overflow-y-auto p-3">
           {nav.map((item) => <SidebarItem key={item.to} item={item} />)}
         </nav>
-        <div className="border-t border-slate-100 p-3"><UserMenu /></div>
+        <div className="border-t border-slate-100 p-3"><UserMenu placement="sidebar" /></div>
       </aside>
 
       {/* Sidebar mobile (drawer) */}
@@ -122,7 +151,7 @@ export function AppLayout() {
               <nav className="flex-1 space-y-1 overflow-y-auto p-3">
                 {nav.map((item) => <SidebarItem key={item.to} item={item} onNav={() => setSidebar(false)} />)}
               </nav>
-              <div className="border-t border-slate-100 p-3"><UserMenu /></div>
+              <div className="border-t border-slate-100 p-3"><UserMenu placement="sidebar" /></div>
             </motion.aside>
           </>
         )}

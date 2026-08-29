@@ -150,8 +150,8 @@ configRouter.put('/profile', requireAuth, (req: AuthedRequest, res, next) => {
   try {
     const e = getEmployee(req.user!.employeeId)
     if (!e) throw httpError(404, 'Không tìm thấy hồ sơ.')
-    const allowed = ['firstName', 'lastName', 'phone', 'address', 'maritalStatus', 'avatarData', 'dateOfBirth']
-    const colMap: Record<string, string> = { firstName: 'first_name', lastName: 'last_name', phone: 'phone', address: 'address', maritalStatus: 'marital_status', avatarData: 'avatar_data', dateOfBirth: 'date_of_birth' }
+    const allowed = ['firstName', 'lastName', 'phone', 'address', 'maritalStatus', 'avatarData', 'dateOfBirth', 'gender']
+    const colMap: Record<string, string> = { firstName: 'first_name', lastName: 'last_name', phone: 'phone', address: 'address', maritalStatus: 'marital_status', avatarData: 'avatar_data', dateOfBirth: 'date_of_birth', gender: 'gender' }
     const sets: string[] = [], vals: any[] = []
     for (const k of allowed) if (k in req.body) { sets.push(`${colMap[k]}=?`); vals.push(req.body[k]) }
     if ('firstName' in req.body || 'lastName' in req.body) {

@@ -6,6 +6,7 @@ import { signToken, requireAuth, type AuthedRequest } from '../middleware/auth.j
 import { getUserByEmail, mapUser, getUserById } from '../repo.js'
 import { httpError } from '../types.js'
 import { pushAudit } from '../helpers.js'
+import { validatePasswordChange } from '../lib/profile.js'
 
 export const authRouter = Router()
 
@@ -40,4 +41,21 @@ authRouter.get('/me', requireAuth, (req: AuthedRequest, res, next) => {
 authRouter.post('/forgot-password', (req, res) => {
   const { email } = req.body ?? {}
   res.json({ ok: true, message: `Đường link đặt lại mật khẩu đã được gửi đến ${email} (demo).` })
+})
+
+authRouter.put('/change-password', requireAuth, (req: AuthedRequest, res, next) => {
+  try {
+    const { currentPassword = '', newPassword = '', confirmPassword = '' } = req.body ?? {}
+    const validationError = validatePasswordChange(currentPassword, newPassword, confirmPassword)
+    if (validationError) throw httpError(400, validationError)
+
+    const row = db.prepare('SELECT * FROM users WHERE id=?').get(req.user!.id) as any
+    if (!row || !bcrypt.compareSync(currentPassword, row.password_hash)) {
+      throw httpError(400, 'Mật khẩu hiện tại không đúng.')
+    }
+
+    db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(bcrypt.hashSync(newPassword, 10), req.user!.id)
+    pushAudit(req.user!.id, req.user!.email, 2, 'User', req.user!.id, 'Đổi mật khẩu tài khoản')
+    res.json({ ok: true })
+  } catch (e) { next(e) }
 })

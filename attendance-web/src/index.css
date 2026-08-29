@@ -62,6 +62,21 @@
 ::-webkit-scrollbar-thumb:hover { @apply bg-slate-400; }
 ::-webkit-scrollbar-track { background: transparent; }
 
+/* Dark theme compatibility for the existing utility-based design system. */
+.dark body, .dark .bg-slate-100 { background-color: #020617; color: #f1f5f9; }
+.dark .bg-white, .dark .card { background-color: #0f172a; }
+.dark .bg-white\/80, .dark .bg-white\/95 { background-color: rgb(15 23 42 / 0.9); }
+.dark .bg-slate-50, .dark .bg-slate-50\/50 { background-color: rgb(30 41 59 / 0.7); }
+.dark .bg-slate-200, .dark .bg-slate-200\/60, .dark .bg-slate-200\/70 { background-color: #334155; }
+.dark .text-slate-900, .dark .text-slate-800, .dark .text-slate-700 { color: #f1f5f9; }
+.dark .text-slate-600, .dark .text-slate-500 { color: #cbd5e1; }
+.dark .border-slate-100, .dark .border-slate-200, .dark .border-slate-300 { border-color: #334155; }
+.dark .ring-slate-100, .dark .ring-slate-200, .dark .ring-slate-200\/70, .dark .ring-slate-300 { --tw-ring-color: rgb(51 65 85); }
+.dark input, .dark select, .dark textarea { border-color: #475569; background-color: #1e293b; color: #f1f5f9; }
+.dark input::placeholder, .dark textarea::placeholder { color: #64748b; }
+.dark .hover\:bg-slate-50:hover, .dark .hover\:bg-slate-100:hover { background-color: #1e293b; }
+.dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]) { border-color: rgb(51 65 85); }
+
 /* Skeleton shimmer */
 .skeleton {
   @apply relative overflow-hidden rounded-md bg-slate-200/70;
