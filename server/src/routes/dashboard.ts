@@ -102,7 +102,9 @@ dashboardRouter.get('/director-reports', requireAuth, (req: AuthedRequest, res, 
     const ids = new Set(employees.map((employee) => employee.id))
     const records = (db.prepare('SELECT * FROM attendance_records WHERE date>=? AND date<=?').all(from, to) as any[])
       .filter((record) => ids.has(record.employee_id))
-    const payslips = db.prepare('SELECT * FROM payslips').all() as any[]
+    const payslips = db.prepare(`SELECT payslip.* FROM payslips payslip
+      JOIN summary_timesheets summary ON summary.period=payslip.period
+      WHERE summary.from_date<=? AND summary.to_date>=?`).all(to, from) as any[]
     const projection = reportProjectionFor(req.authorizationActor!)
     const rows = employees.map((employee) => {
       const employeeRecords = records.filter((record) => record.employee_id === employee.id)

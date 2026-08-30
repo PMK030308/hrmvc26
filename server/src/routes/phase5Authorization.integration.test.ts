@@ -191,6 +191,7 @@ test('self payslip and payroll sheet permissions do not trust role names or JWT 
 })
 
 test('aggregate payroll report omits employee net while detail permission exposes it', async () => {
+  insertSummary(4)
   insertAttendance('employee-employee')
   insertPayslip('employee-employee')
   setPermission('HR', 'reports.attendance.view_scoped', true)

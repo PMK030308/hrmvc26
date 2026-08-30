@@ -248,11 +248,25 @@ attendanceRouter.post('/proxy-punch', requireAuth, (req: AuthedRequest, res, nex
 
 attendanceRouter.post('/confirm-timesheet', requireAuth, requirePermission(ATTENDANCE_PERMISSIONS.CONFIRM_SELF), (req: AuthedRequest, res, next) => {
   try {
-    const { summaryTimesheetDetailId, status, comment } = req.body ?? {}
-    const row = db.prepare('SELECT * FROM summary_timesheet_details WHERE id=?').get(summaryTimesheetDetailId) as any
-    if (!row || row.employee_id !== req.user!.employeeId) throw new Error('Không tìm thấy dòng bảng công để xác nhận.')
-    db.prepare('UPDATE summary_timesheet_details SET confirmation_status=?, confirmation_comment=? WHERE id=?').run(status, comment ?? null, summaryTimesheetDetailId)
-    res.json({ ok: true })
+    const detailId = typeof req.body?.summaryTimesheetDetailId === 'string' ? req.body.summaryTimesheetDetailId : ''
+    const status = Number(req.body?.status)
+    const comment = typeof req.body?.comment === 'string' ? req.body.comment.trim() || null : null
+    if (!detailId || (status !== 2 && status !== 3)) throw httpError(400, 'Dữ liệu xác nhận bảng công không hợp lệ.')
+    const result = db.transaction(() => {
+      const row = db.prepare(`SELECT detail.*, summary.status summary_status
+        FROM summary_timesheet_details detail
+        JOIN summary_timesheets summary ON summary.id=detail.summary_timesheet_id
+        WHERE detail.id=?`).get(detailId) as any
+      if (!row || row.employee_id !== req.user!.employeeId) throw httpError(404, 'Không tìm thấy dòng bảng công để xác nhận.')
+      if (row.summary_status !== 2 || row.confirmation_status !== 1) throw httpError(409, 'Dòng bảng công đã được xử lý hoặc kỳ công không còn cho phép xác nhận.')
+      const update = db.prepare(`UPDATE summary_timesheet_details SET confirmation_status=?, confirmation_comment=?
+        WHERE id=? AND confirmation_status=1`).run(status, comment, detailId)
+      if (update.changes !== 1) throw httpError(409, 'Dòng bảng công đã được xử lý. Vui lòng tải lại.')
+      db.prepare('UPDATE summary_timesheets SET version=version+1 WHERE id=? AND status=2').run(row.summary_timesheet_id)
+      pushAudit(req.user!.id, req.user!.email, 2, 'SummaryTimesheetDetail', detailId, `Nhân viên xác nhận bảng công trạng thái ${status}`)
+      return { ok: true }
+    }).immediate()
+    res.json(result)
   } catch (e) { next(e) }
 })
 
