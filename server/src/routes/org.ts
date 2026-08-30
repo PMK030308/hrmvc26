@@ -1,7 +1,7 @@
 // Org routes: branches / departments / positions / employees (Admin/HR)
 import { Router } from 'express'
 import { db } from '../db.js'
-import { requireAuth, requireRole, type AuthedRequest } from '../middleware/auth.js'
+import { requireAuth, requirePermission, requireRole, type AuthedRequest } from '../middleware/auth.js'
 import { allEmployees, getEmployee, mapEmployee, mapBranch, mapDepartment, mapPosition, uid } from '../repo.js'
 import { httpError } from '../types.js'
 import { applyEmployeeStatusAuthorizationChange } from '../services/permissionService.js'
@@ -98,6 +98,15 @@ orgRouter.delete('/employees/:id', requireAuth, requireRole('Admin'), (req: Auth
   } catch (e) { next(e) }
 })
 
-orgRouter.post('/reset-demo', requireAuth, requireRole('Admin'), (_req, res, next) => {
-  try { truncateAndSeed(); res.json({ ok: true }) } catch (e) { next(e) }
+orgRouter.post('/reset-demo', requireAuth, requirePermission('system.demo_reset'), (req, res, next) => {
+  try {
+    if (process.env.NODE_ENV === 'production' || process.env.HRM_ALLOW_DEMO_RESET !== 'true') {
+      throw httpError(404, 'Không tìm thấy endpoint.')
+    }
+    if (req.body?.confirmation !== 'RESET_DEMO_DATA') {
+      throw httpError(400, 'Cần xác nhận chính xác để khôi phục dữ liệu demo.')
+    }
+    truncateAndSeed()
+    res.json({ ok: true })
+  } catch (e) { next(e) }
 })

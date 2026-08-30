@@ -31,6 +31,7 @@ export const PERMISSION_CATALOG: readonly PermissionDefinition[] = [
   { key: REQUEST_PERMISSIONS.SHIFT_SWAP_RESPOND, module: 'requests', label: 'Phản hồi khi là đối tác đổi ca', enforced: true, defaultRoles: employee },
   { key: 'config.permission.manage', module: 'config', label: 'Quản lý ma trận phân quyền', enforced: true, defaultRoles: ['Admin'] },
   { key: 'config.user.manage', module: 'config', label: 'Quản lý quyền và trạng thái tài khoản', enforced: true, defaultRoles: ['Admin'] },
+  { key: 'system.demo_reset', module: 'system', label: 'Khôi phục dữ liệu demo', enforced: true, defaultRoles: ['Admin'] },
   { key: ATTENDANCE_PERMISSIONS.PUNCH_SELF, module: 'attendance', label: 'Chấm công cho chính mình', enforced: true, defaultRoles: employee },
   { key: ATTENDANCE_PERMISSIONS.VIEW_SELF, module: 'attendance', label: 'Xem công của chính mình', enforced: true, defaultRoles: employee },
   { key: ATTENDANCE_PERMISSIONS.VIEW_SCOPED, module: 'attendance', label: 'Xem công theo effective scope', enforced: true, defaultRoles: ['Manager', 'HR'] },

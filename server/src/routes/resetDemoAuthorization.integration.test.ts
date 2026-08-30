@@ -65,7 +65,7 @@ function token(): string {
 
 function setPermission(allowed: boolean): void {
   db.prepare(`INSERT INTO role_feature_permissions (role, feature, action, allowed, updated_at)
-    VALUES ('Admin', 'system.demo', 'reset', ?, '2026-08-30T00:00:00')
+    VALUES ('Admin', 'system', 'demo_reset', ?, '2026-08-30T00:00:00')
     ON CONFLICT(role, feature, action) DO UPDATE SET allowed=excluded.allowed`).run(allowed ? 1 : 0)
 }
 
