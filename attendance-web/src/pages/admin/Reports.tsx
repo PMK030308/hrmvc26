@@ -24,12 +24,13 @@ export default function AdminReports() {
   const totalPaid = rows.reduce((s, r) => s + r.paidUnits, 0)
   const totalOt = rows.reduce((s, r) => s + r.otHours, 0)
   const totalLate = rows.reduce((s, r) => s + r.late, 0)
-  const totalNet = rows.reduce((s, r) => s + r.net, 0)
+  const showNet = data?.projection === 'detail'
+  const totalNet = data?.payroll?.totalNet ?? 0
 
   function exportCsv() {
     if (rows.length === 0) { toast.error('Chưa có dữ liệu'); return }
-    const out = [['Nhân viên', 'Công hưởng (h)', 'Giờ OT', 'Ngày đi muộn', 'Thực lĩnh']]
-      .concat(rows.map((r) => [r.name, String(r.paidUnits), String(r.otHours), String(r.late), String(r.net)]))
+    const out = [['Nhân viên', 'Công hưởng (h)', 'Giờ OT', 'Ngày đi muộn', ...(showNet ? ['Thực lĩnh'] : [])]]
+      .concat(rows.map((r) => [r.name, String(r.paidUnits), String(r.otHours), String(r.late), ...(showNet ? [String(r.net ?? 0)] : [])]))
     const csv = '﻿' + out.map((r) => r.map((c) => `"${c}"`).join(',')).join('\n')
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
     const url = URL.createObjectURL(blob)
@@ -82,15 +83,15 @@ export default function AdminReports() {
               <Mini label="Tổng công hưởng" value={fmtHours(totalPaid)} />
               <Mini label="Tổng giờ OT" value={fmtHours(totalOt)} />
               <Mini label="Số lượt muộn" value={fmtNum(totalLate)} />
-              <Mini label="Tổng thực lĩnh" value={fmtCurrency(totalNet)} />
+              {data?.payroll && <Mini label="Tổng thực lĩnh" value={fmtCurrency(totalNet)} />}
             </div>
-            <Table headers={['Nhân viên', 'Công hưởng', 'Giờ OT', 'Ngày muộn', 'Thực lĩnh']}>
+            <Table headers={['Nhân viên', 'Công hưởng', 'Giờ OT', 'Ngày muộn', ...(showNet ? ['Thực lĩnh'] : [])]}>
               {rows.map((r) => (
                 <Tr key={r.name}>
                   <Td className="font-medium text-slate-800">{r.name}</Td>
                   <Td>{fmtHours(r.paidUnits)}</Td><Td>{fmtHours(r.otHours)}</Td>
                   <Td>{r.late}</Td>
-                  <Td className="flex items-center gap-1.5 font-semibold text-slate-800"><Wallet className="h-3.5 w-3.5 text-slate-400" />{fmtCurrency(r.net)}</Td>
+                  {showNet && <Td className="flex items-center gap-1.5 font-semibold text-slate-800"><Wallet className="h-3.5 w-3.5 text-slate-400" />{fmtCurrency(r.net ?? 0)}</Td>}
                 </Tr>
               ))}
             </Table>

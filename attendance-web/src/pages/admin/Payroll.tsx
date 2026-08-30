@@ -12,14 +12,15 @@ export default function AdminPayroll() {
   const [period, setPeriod] = useState('')
   const active = period || (periods?.[0] ?? '')
   const { data: sheet, isLoading } = useQuery({ queryKey: ['payroll', 'sheet', active], queryFn: () => payrollApi.sheet(active), enabled: !!active })
+  const payslips = sheet?.payslips ?? []
 
-  const totalNet = (sheet ?? []).reduce((s, p) => s + p.net, 0)
-  const totalGross = (sheet ?? []).reduce((s, p) => s + p.gross, 0)
+  const totalNet = payslips.reduce((s, p) => s + p.net, 0)
+  const totalGross = payslips.reduce((s, p) => s + p.gross, 0)
 
   function exportCsv() {
-    if (!sheet || sheet.length === 0) { toast.error('Không có dữ liệu để xuất'); return }
+    if (payslips.length === 0) { toast.error('Không có dữ liệu để xuất'); return }
     const rows = [['Mã NV', 'Họ tên', 'Lương cơ bản', 'Công hưởng', 'Làm thêm', 'Phụ cấp', 'Khấu trừ', 'Thực lĩnh']]
-      .concat(sheet.map((p) => [p.employeeName, p.employeeName, String(p.baseSalary), String(p.paidWork), String(p.overtime), String(p.allowance), String(p.deductions), String(p.net)]))
+      .concat(payslips.map((p) => [p.employeeName, p.employeeName, String(p.baseSalary), String(p.paidWork), String(p.overtime), String(p.allowance), String(p.deductions), String(p.net)]))
     const csv = '﻿' + rows.map((r) => r.map((c) => `"${c}"`).join(',')).join('\n')
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
     const url = URL.createObjectURL(blob)
@@ -30,7 +31,7 @@ export default function AdminPayroll() {
   return (
     <div>
       <PageHeader title="Bảng lương" subtitle="Phiếu lương theo kỳ thanh toán" actions={
-        <Button variant="secondary" icon={<Download className="h-4 w-4" />} onClick={exportCsv} disabled={!sheet?.length}>Xuất CSV</Button>
+        <Button variant="secondary" icon={<Download className="h-4 w-4" />} onClick={exportCsv} disabled={!payslips.length}>Xuất CSV</Button>
       } />
 
       <div className="grid gap-5 lg:grid-cols-4">
@@ -50,17 +51,17 @@ export default function AdminPayroll() {
         </Card>
 
         <div className="space-y-5 lg:col-span-3">
-          {isLoading ? <Card className="p-5"><Spinner /></Card> : !sheet || sheet.length === 0 ? <Card><EmptyState icon={<BadgeDollarSign className="h-6 w-6" />} title="Không có phiếu lương" /></Card> : (
+          {isLoading ? <Card className="p-5"><Spinner /></Card> : payslips.length === 0 ? <Card><EmptyState icon={<BadgeDollarSign className="h-6 w-6" />} title="Không có phiếu lương" /></Card> : (
             <>
               <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
                 <StatCard label="Tổng quỹ lương (NET)" value={fmtCurrency(totalNet)} icon={<BadgeDollarSign className="h-5 w-5" />} tone="brand" />
                 <StatCard label="Tổng Gross" value={fmtCurrency(totalGross)} icon={<BadgeDollarSign className="h-5 w-5" />} tone="info" />
-                <StatCard label="Số phiếu" value={sheet.length} icon={<FileText className="h-5 w-5" />} tone="success" />
+                <StatCard label="Số phiếu" value={payslips.length} icon={<FileText className="h-5 w-5" />} tone="success" />
               </div>
               <Card>
-                <CardHeader title={periodLabel(active)} subtitle={`${sheet.length} phiếu lương`} icon={<BadgeDollarSign className="h-4 w-4" />} />
+                <CardHeader title={periodLabel(active)} subtitle={`${payslips.length} phiếu lương`} icon={<BadgeDollarSign className="h-4 w-4" />} />
                 <Table headers={['Nhân viên', 'Cơ bản', 'Công hưởng', 'OT', 'Phụ cấp', 'Khấu trừ', 'Thực lĩnh']}>
-                  {sheet.map((p: Payslip) => (
+                  {payslips.map((p: Payslip) => (
                     <Tr key={p.id}>
                       <Td><p className="font-medium text-slate-800">{p.employeeName}</p><p className="text-xs text-slate-400">#{p.employeeId.slice(-6)}</p></Td>
                       <Td>{fmtCurrency(p.baseSalary)}</Td><Td>{fmtCurrency(p.paidWork)}</Td>

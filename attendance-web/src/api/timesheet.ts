@@ -3,7 +3,7 @@
 // ============================================================================
 import { api } from './http'
 import type {
-  AttendanceRecord, Employee, SummaryTimesheet, Payslip,
+  AttendanceRecord, Employee, SummaryTimesheet, Payslip, PayrollSheet,
 } from '@/types'
 
 export const timesheetApi = {
@@ -19,11 +19,11 @@ export const timesheetApi = {
 
   listSummary(): Promise<SummaryTimesheet[]> { return api.get('/timesheet/list-summary') },
 
-  confirmByHr(id: string): Promise<SummaryTimesheet> { return api.post(`/timesheet/confirm-by-hr/${id}`) },
+  confirmByHr(id: string, expectedVersion: number): Promise<SummaryTimesheet> { return api.post(`/timesheet/confirm-by-hr/${id}`, { expectedVersion }) },
 
-  transferToPayroll(id: string): Promise<SummaryTimesheet> { return api.post(`/timesheet/transfer-to-payroll/${id}`) },
+  transferToPayroll(id: string, expectedVersion: number): Promise<SummaryTimesheet> { return api.post(`/timesheet/transfer-to-payroll/${id}`, { expectedVersion }) },
 
-  rebuild(id: string): Promise<SummaryTimesheet> { return api.post(`/timesheet/rebuild/${id}`) },
+  rebuild(id: string, expectedVersion: number): Promise<SummaryTimesheet> { return api.post(`/timesheet/rebuild/${id}`, { expectedVersion }) },
 }
 
 export const payrollApi = {
@@ -31,9 +31,11 @@ export const payrollApi = {
 
   byPeriod(period: string): Promise<Payslip | null> { return api.get(`/payroll/by-period/${period}`) },
 
-  sheet(period: string): Promise<Payslip[]> { return api.get(`/payroll/sheet/${period}`) },
+  sheet(period: string): Promise<PayrollSheet> { return api.get(`/payroll/sheet/${period}`) },
 
   periods(): Promise<string[]> { return api.get('/payroll/periods') },
 
-  approvePayroll(period: string): Promise<{ ok: true }> { return api.post(`/payroll/approve-payroll/${period}`) },
+  approvePayroll(period: string, expectedVersion: number): Promise<{ ok: true; period: string; status: number; version: number }> {
+    return api.post(`/payroll/approve-payroll/${period}`, { expectedVersion })
+  },
 }

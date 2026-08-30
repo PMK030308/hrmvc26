@@ -1,5 +1,5 @@
 import { createBrowserRouter, Navigate } from 'react-router-dom'
-import { RequireAuth, RequirePermission, RequireRole, GuestOnly } from './guards'
+import { RequireAnyPermission, RequireAuth, RequirePermission, RequireRole, GuestOnly } from './guards'
 import { AppLayout } from '@/components/layout/AppLayout'
 import { homeForRoles } from '@/components/layout/nav'
 import { useAuthStore } from '@/stores/authStore'
@@ -68,14 +68,14 @@ export const router = createBrowserRouter([
     children: [
       { path: '/employee', element: <EmployeeHome /> },
       { path: '/employee/attendance', element: <AttendancePage /> },
-      { path: '/employee/timesheet', element: <TimesheetPage /> },
+      { path: '/employee/timesheet', element: <RequirePermission permission="timesheet.detail.view_self"><TimesheetPage /></RequirePermission> },
       { path: '/employee/shift-schedule', element: <ShiftSchedulePage /> },
       { path: '/employee/leave-plan', element: <LeavePlanPage /> },
       { path: '/employee/requests', element: <RequestsPage /> },
       { path: '/employee/requests/:type/new', element: <RequestCreatePage /> },
       { path: '/employee/requests/:type/:id', element: <RequestDetailPage /> },
       { path: '/employee/approvals', element: <ApprovalsPage /> },
-      { path: '/employee/salary', element: <SalaryPage /> },
+      { path: '/employee/salary', element: <RequirePermission permission="payroll.payslip.view_self"><SalaryPage /></RequirePermission> },
       { path: '/employee/profile', element: <ProfilePage /> },
       { path: '/employee/notifications', element: <NotificationsPage /> },
       { path: '/employee/leavers-today', element: <LeaversTodayPage /> },
@@ -96,17 +96,17 @@ export const router = createBrowserRouter([
   {
     element: <RequireAuth><RequireRole roles={['HR', 'Admin']}><AppLayout /></RequireRole></RequireAuth>,
     children: [
-      { path: '/admin/dashboard', element: <AdminDashboard /> },
+      { path: '/admin/dashboard', element: <RequireAnyPermission permissions={['reports.attendance.view_scoped', 'reports.attendance.view_all']}><AdminDashboard /></RequireAnyPermission> },
       { path: '/admin/live', element: <AdminLive /> },
       { path: '/admin/employees', element: <AdminEmployees /> },
       { path: '/admin/departments', element: <AdminDepartments /> },
       { path: '/admin/shifts', element: <AdminShifts /> },
       { path: '/admin/shift-schedule', element: <AdminShiftSchedule /> },
-      { path: '/admin/timesheet', element: <AdminTimesheet /> },
-      { path: '/admin/summary-timesheet', element: <AdminSummaryTimesheet /> },
+      { path: '/admin/timesheet', element: <RequireAnyPermission permissions={['timesheet.detail.view_scoped', 'timesheet.detail.view_all']}><AdminTimesheet /></RequireAnyPermission> },
+      { path: '/admin/summary-timesheet', element: <RequireAnyPermission permissions={['timesheet.summary.view_scoped', 'timesheet.summary.view_all']}><AdminSummaryTimesheet /></RequireAnyPermission> },
       { path: '/admin/requests', element: <AdminRequests /> },
-      { path: '/admin/payroll', element: <AdminPayroll /> },
-      { path: '/admin/reports', element: <AdminReports /> },
+      { path: '/admin/payroll', element: <RequirePermission permission="payroll.sheet.view"><AdminPayroll /></RequirePermission> },
+      { path: '/admin/reports', element: <RequireAnyPermission permissions={['reports.attendance.view_scoped', 'reports.attendance.view_all']}><AdminReports /></RequireAnyPermission> },
       { path: '/admin/regulations/:tab?', element: <AdminRegulations /> },
       { path: '/admin/audit', element: <AdminAudit /> },
     ],
@@ -116,8 +116,8 @@ export const router = createBrowserRouter([
   {
     element: <RequireAuth><RequireRole roles={['Accountant', 'Admin']}><AppLayout /></RequireRole></RequireAuth>,
     children: [
-      { path: '/accountant/payroll', element: <AccountantPayroll /> },
-      { path: '/accountant/reports', element: <AccountantReports /> },
+      { path: '/accountant/payroll', element: <RequirePermission permission="payroll.sheet.view"><AccountantPayroll /></RequirePermission> },
+      { path: '/accountant/reports', element: <RequirePermission permission="reports.payroll.view_detail"><AccountantReports /></RequirePermission> },
     ],
   },
 
@@ -127,8 +127,8 @@ export const router = createBrowserRouter([
     children: [
       { path: '/director', element: <DirectorDashboard /> },
       { path: '/director/approvals', element: <DirectorApprovals /> },
-      { path: '/director/payroll', element: <DirectorPayroll /> },
-      { path: '/director/reports', element: <DirectorReports /> },
+      { path: '/director/payroll', element: <RequirePermission permission="reports.payroll.view_aggregate"><DirectorPayroll /></RequirePermission> },
+      { path: '/director/reports', element: <RequireAnyPermission permissions={['reports.attendance.view_scoped', 'reports.attendance.view_all']}><DirectorReports /></RequireAnyPermission> },
     ],
   },
 

@@ -2,17 +2,19 @@
 // API — Dashboard (Admin/HR) + Director (§10 / §14.7) — HTTP.
 // ============================================================================
 import { api } from './http'
-import type { AdminDashboard, AnyRequest, Payslip, SalaryFund, WorkHoursAvg, SalaryMonthly } from '@/types'
+import type { AdminDashboard, AnyRequest, PayrollAggregate, SalaryFund, WorkHoursAvg, SalaryMonthly } from '@/types'
 
 export const dashboardApi = {
   admin(): Promise<AdminDashboard> { return api.get('/dashboard/admin') },
 
   directorApprovals(): Promise<AnyRequest[]> { return api.get('/dashboard/director-approvals') },
 
-  directorPayrolls(): Promise<Payslip[]> { return api.get('/dashboard/director-payrolls') },
+  directorPayrolls(): Promise<PayrollAggregate | null> { return api.get('/dashboard/director-payrolls') },
 
   directorReports(from: string, to: string): Promise<{
-    employees: { name: string; paidUnits: number; otHours: number; late: number; net: number }[]
+    employees: { name: string; paidUnits: number; otHours: number; late: number; net?: number }[]
+    payroll: { totalNet: number; totalGross: number } | null
+    projection: 'attendance' | 'aggregate' | 'detail'
   }> {
     return api.get('/dashboard/director-reports', { from, to })
   },

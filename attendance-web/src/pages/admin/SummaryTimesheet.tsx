@@ -8,6 +8,8 @@ import { SUMMARY_TS_LABEL, CONFIRM_LABEL } from '@/constants/enums'
 import { PageHeader, Card, CardHeader, CardBody, Spinner, EmptyState, Button, StatusBadge, Modal, Table, Tr, Td, Badge } from '@/components/ui'
 import { PeriodPicker } from '@/components/admin/widgets'
 import type { SummaryTimesheet } from '@/types'
+import { useAuthStore } from '@/stores/authStore'
+import { phase5Capabilities, shouldReloadFinancialState } from '@/lib/phase5Capabilities'
 
 export default function AdminSummaryTimesheet() {
   const qc = useQueryClient()
@@ -16,6 +18,8 @@ export default function AdminSummaryTimesheet() {
   const [month, setMonth] = useState(now.getMonth() + 1)
   const [half, setHalf] = useState<1 | 2>(now.getDate() <= 15 ? 1 : 2)
   const [view, setView] = useState<SummaryTimesheet | null>(null)
+  const user = useAuthStore((state) => state.user)!
+  const capabilities = phase5Capabilities(user.effectivePermissions ?? [])
 
   const { data: list, isLoading } = useQuery({ queryKey: ['summary', 'list'], queryFn: () => timesheetApi.listSummary() })
 
@@ -25,26 +29,35 @@ export default function AdminSummaryTimesheet() {
     onError: (e: Error) => toast.error(e.message),
   })
   const confirm = useMutation({
-    mutationFn: (id: string) => timesheetApi.confirmByHr(id),
+    mutationFn: (summary: SummaryTimesheet) => timesheetApi.confirmByHr(summary.id, summary.version),
     onSuccess: () => { toast.success('Đã xác nhận bảng công'); qc.invalidateQueries({ queryKey: ['summary', 'list'] }) },
-    onError: (e: Error) => toast.error(e.message),
+    onError: handleFinancialError,
   })
   const transfer = useMutation({
-    mutationFn: (id: string) => timesheetApi.transferToPayroll(id),
+    mutationFn: (summary: SummaryTimesheet) => timesheetApi.transferToPayroll(summary.id, summary.version),
     onSuccess: () => { toast.success('Đã chuyển sang lương'); qc.invalidateQueries({ queryKey: ['summary', 'list'] }) },
-    onError: (e: Error) => toast.error(e.message),
+    onError: handleFinancialError,
   })
   const rebuild = useMutation({
-    mutationFn: (id: string) => timesheetApi.rebuild(id),
+    mutationFn: (summary: SummaryTimesheet) => timesheetApi.rebuild(summary.id, summary.version),
     onSuccess: () => { toast.success('Đã tính lại bảng công'); qc.invalidateQueries({ queryKey: ['summary', 'list'] }) },
-    onError: (e: Error) => toast.error(e.message),
+    onError: handleFinancialError,
   })
+
+  function handleFinancialError(error: Error) {
+    if (shouldReloadFinancialState(error)) {
+      toast.error('Dữ liệu đã thay đổi. Danh sách đang được tải lại.')
+      qc.invalidateQueries({ queryKey: ['summary', 'list'] })
+      return
+    }
+    toast.error(error.message)
+  }
 
   return (
     <div>
       <PageHeader title="Bảng công tổng hợp" subtitle="Tạo & xử lý bảng công theo kỳ (nửa tháng)" />
 
-      <Card className="mb-5">
+      {capabilities.canBuildSummary && <Card className="mb-5">
         <CardHeader title="Tạo bảng công mới" icon={<Plus className="h-4 w-4" />} />
         <CardBody>
           <div className="flex flex-wrap items-end justify-between gap-4">
@@ -53,7 +66,7 @@ export default function AdminSummaryTimesheet() {
           </div>
           <p className="mt-3 text-xs text-slate-400">Nếu kỳ đã tồn tại, hệ thống trả về bảng cũ.</p>
         </CardBody>
-      </Card>
+      </Card>}
 
       <div className="grid gap-4">
         {isLoading ? <Card className="p-5"><Spinner /></Card> : (list ?? []).length === 0 ? <Card><EmptyState icon={<ListChecks className="h-6 w-6" />} title="Chưa có bảng công tổng hợp" description="Tạo bảng công mới cho kỳ hiện tại." /></Card> : list!.map((st) => (
@@ -63,9 +76,9 @@ export default function AdminSummaryTimesheet() {
               action={<StatusBadge map={SUMMARY_TS_LABEL} value={st.status} />} />
             <CardBody className="flex flex-wrap items-center gap-2">
               <Button size="sm" variant="secondary" icon={<Eye className="h-4 w-4" />} onClick={() => setView(st)}>Chi tiết</Button>
-              <Button size="sm" variant="secondary" icon={<RefreshCw className="h-4 w-4" />} loading={rebuild.isPending} onClick={() => rebuild.mutate(st.id)}>Tính lại</Button>
-              {st.status === 2 && <Button size="sm" variant="success" icon={<CheckCircle2 className="h-4 w-4" />} loading={confirm.isPending} onClick={() => confirm.mutate(st.id)}>HR xác nhận</Button>}
-              {st.status <= 3 && <Button size="sm" icon={<BadgeDollarSign className="h-4 w-4" />} loading={transfer.isPending} onClick={() => transfer.mutate(st.id)}>Chuyển sang lương</Button>}
+              {st.capabilities.canRebuild && <Button size="sm" variant="secondary" icon={<RefreshCw className="h-4 w-4" />} loading={rebuild.isPending} onClick={() => rebuild.mutate(st)}>Tính lại</Button>}
+              {st.capabilities.canConfirmHr && <Button size="sm" variant="success" icon={<CheckCircle2 className="h-4 w-4" />} loading={confirm.isPending} onClick={() => confirm.mutate(st)}>HR xác nhận</Button>}
+              {st.capabilities.canTransferPayroll && <Button size="sm" icon={<BadgeDollarSign className="h-4 w-4" />} loading={transfer.isPending} onClick={() => transfer.mutate(st)}>Chuyển sang lương</Button>}
               {st.status === 4 && <Badge tone="brand" dot>Đã sinh phiếu lương</Badge>}
             </CardBody>
           </Card>

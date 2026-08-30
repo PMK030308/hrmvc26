@@ -17,7 +17,8 @@ export default function DirectorReports() {
     queryFn: () => dashboardApi.directorReports(from, to),
   })
   const rows = data?.employees ?? []
-  const totalNet = rows.reduce((s, r) => s + r.net, 0)
+  const showNet = data?.projection === 'detail'
+  const totalNet = data?.payroll?.totalNet ?? 0
   const totalPaid = rows.reduce((s, r) => s + r.paidUnits, 0)
   const totalOt = rows.reduce((s, r) => s + r.otHours, 0)
 
@@ -49,18 +50,18 @@ export default function DirectorReports() {
       <div className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
         <StatCard label="Tổng công hưởng" value={fmtHours(totalPaid)} icon={<BarChart3 className="h-5 w-5" />} tone="brand" />
         <StatCard label="Tổng giờ OT" value={fmtHours(totalOt)} icon={<BarChart3 className="h-5 w-5" />} tone="info" />
-        <StatCard label="Tổng thực lĩnh" value={fmtCurrency(totalNet)} icon={<Wallet className="h-5 w-5" />} tone="success" />
+        {data?.payroll && <StatCard label="Tổng thực lĩnh" value={fmtCurrency(totalNet)} icon={<Wallet className="h-5 w-5" />} tone="success" />}
       </div>
 
       <Card>
         <CardHeader title={`Báo cáo · ${from} → ${to}`} icon={<BarChart3 className="h-4 w-4" />} />
         {isLoading ? <div className="p-5"><Spinner /></div> : rows.length === 0 ? <EmptyState icon={<BarChart3 className="h-6 w-6" />} title="Không có dữ liệu" /> : (
-          <Table headers={['Nhân viên', 'Công hưởng', 'Giờ OT', 'Ngày muộn', 'Thực lĩnh']}>
+          <Table headers={['Nhân viên', 'Công hưởng', 'Giờ OT', 'Ngày muộn', ...(showNet ? ['Thực lĩnh'] : [])]}>
             {rows.map((r) => (
               <Tr key={r.name}>
                 <Td className="font-medium text-slate-800">{r.name}</Td>
                 <Td>{fmtHours(r.paidUnits)}</Td><Td>{fmtHours(r.otHours)}</Td><Td>{fmtNum(r.late)}</Td>
-                <Td className="font-semibold text-slate-800">{fmtCurrency(r.net)}</Td>
+                {showNet && <Td className="font-semibold text-slate-800">{fmtCurrency(r.net ?? 0)}</Td>}
               </Tr>
             ))}
           </Table>

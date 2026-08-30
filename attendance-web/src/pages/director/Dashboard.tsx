@@ -11,11 +11,10 @@ import { requestSummary } from '@/components/requests/widgets'
 export default function DirectorDashboard() {
   const { data: kpi, isLoading } = useQuery({ queryKey: ['dashboard', 'admin'], queryFn: () => dashboardApi.admin() })
   const { data: approvals } = useQuery({ queryKey: ['director', 'approvals'], queryFn: () => dashboardApi.directorApprovals() })
-  const { data: payslips } = useQuery({ queryKey: ['director', 'payrolls'], queryFn: () => dashboardApi.directorPayrolls() })
+  const { data: payroll } = useQuery({ queryKey: ['director', 'payrolls'], queryFn: () => dashboardApi.directorPayrolls() })
 
   if (isLoading || !kpi) return <Card className="p-5"><Spinner /></Card>
-  const totalNet = (payslips ?? []).reduce((s, p) => s + p.net, 0)
-  const latestPeriod = payslips?.[0]?.period
+  const latestPeriod = payroll?.period
 
   return (
     <div>
@@ -64,10 +63,10 @@ export default function DirectorDashboard() {
               <>
                 <div className="rounded-xl bg-brand-50 p-4">
                   <p className="text-xs text-brand-700">Tổng quỹ lương NET</p>
-                  <p className="mt-1 text-2xl font-bold text-brand-700">{fmtCurrency(totalNet)}</p>
-                  <p className="mt-0.5 text-xs text-brand-600/70">Kỳ {latestPeriod} · {payslips?.length ?? 0} phiếu</p>
+                  <p className="mt-1 text-2xl font-bold text-brand-700">{fmtCurrency(payroll?.totalNet ?? 0)}</p>
+                  <p className="mt-0.5 text-xs text-brand-600/70">Kỳ {latestPeriod} · {payroll?.headcount ?? 0} phiếu</p>
                 </div>
-                <Link to="/director/payroll"><button className="w-full rounded-lg bg-success-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-success-700">Duyệt kỳ lương</button></Link>
+                <Link to="/director/payroll"><button className="w-full rounded-lg bg-success-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-success-700">Xem kỳ lương</button></Link>
               </>
             ) : <EmptyState icon={<BadgeDollarSign className="h-6 w-6" />} title="Chưa có kỳ lương" />}
           </CardBody>

@@ -18,27 +18,28 @@ export default function AccountantReports() {
   const [period, setPeriod] = useState('')
   const active = period || (periods?.[0] ?? '')
   const { data: sheet, isLoading: ls } = useQuery({ queryKey: ['payroll', 'sheet', active], queryFn: () => payrollApi.sheet(active), enabled: !!active })
+  const payslips = useMemo(() => sheet?.payslips ?? [], [sheet])
 
   const totals = useMemo(() => {
-    const s = sheet ?? []
+    const s = payslips
     return {
       gross: s.reduce((a, p) => a + p.gross, 0),
       net: s.reduce((a, p) => a + p.net, 0),
       deductions: s.reduce((a, p) => a + p.deductions, 0),
       ot: s.reduce((a, p) => a + p.overtime, 0),
     }
-  }, [sheet])
+  }, [payslips])
 
   const byType = useMemo(() => {
     const map = new Map<PayrollComponentType, number>()
-    for (const p of sheet ?? []) for (const c of p.components) map.set(c.type, (map.get(c.type) ?? 0) + c.amount)
+    for (const p of payslips) for (const c of p.components) map.set(c.type, (map.get(c.type) ?? 0) + c.amount)
     return [...map.entries()].sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
-  }, [sheet])
+  }, [payslips])
 
   function exportCsv() {
-    if (!sheet || sheet.length === 0) { toast.error('Chưa có dữ liệu'); return }
+    if (payslips.length === 0) { toast.error('Chưa có dữ liệu'); return }
     const out = [['Nhân viên', 'Cơ bản', 'Công hưởng', 'OT', 'Phụ cấp', 'Bảo hiểm', 'Thuế', 'Khấu trừ', 'Thực lĩnh']]
-      .concat(sheet.map((p) => {
+      .concat(payslips.map((p) => {
         const ins = p.components.find((c) => c.type === 7)?.amount ?? 0
         const tax = p.components.find((c) => c.type === 8)?.amount ?? 0
         return [p.employeeName, String(p.baseSalary), String(p.paidWork), String(p.overtime), String(p.allowance), String(ins), String(tax), String(p.deductions), String(p.net)]
@@ -53,7 +54,7 @@ export default function AccountantReports() {
   return (
     <div>
       <PageHeader title="Báo cáo tài chính" subtitle="Tổng hợp khoản lương & khấu trừ theo kỳ" actions={
-        <Button variant="secondary" icon={<Download className="h-4 w-4" />} onClick={exportCsv} disabled={!sheet?.length}>Xuất CSV</Button>
+        <Button variant="secondary" icon={<Download className="h-4 w-4" />} onClick={exportCsv} disabled={!payslips.length}>Xuất CSV</Button>
       } />
 
       <Card className="mb-5 p-4">
@@ -62,7 +63,7 @@ export default function AccountantReports() {
         </Select>
       </Card>
 
-      {isLoading || ls ? <Card className="p-5"><Spinner /></Card> : !sheet || sheet.length === 0 ? <Card><EmptyState icon={<BarChart3 className="h-6 w-6" />} title="Chưa có dữ liệu kỳ này" /></Card> : (
+      {isLoading || ls ? <Card className="p-5"><Spinner /></Card> : payslips.length === 0 ? <Card><EmptyState icon={<BarChart3 className="h-6 w-6" />} title="Chưa có dữ liệu kỳ này" /></Card> : (
         <>
           <div className="mb-5 grid grid-cols-2 gap-4 lg:grid-cols-4">
             <StatCard label="Tổng Gross" value={fmtCurrency(totals.gross)} icon={<TrendingUp className="h-5 w-5" />} tone="info" />
@@ -93,7 +94,7 @@ export default function AccountantReports() {
             <Card>
               <CardHeader title="Thực lĩnh theo nhân viên" icon={<Wallet className="h-4 w-4" />} />
               <Table headers={['Nhân viên', 'Gross', 'Khấu trừ', 'NET']}>
-                {sheet.map((p) => (
+                {payslips.map((p) => (
                   <Tr key={p.id}>
                     <Td className="font-medium text-slate-800">{p.employeeName}</Td>
                     <Td>{fmtCurrency(p.gross)}</Td><Td className="text-danger-600">-{fmtCurrency(p.deductions)}</Td>

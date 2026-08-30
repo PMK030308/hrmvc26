@@ -577,6 +577,19 @@ export interface SummaryTimesheet {
   status: SummaryTimesheetStatus
   from: string
   to: string
+  version: number
+  confirmedBy: string | null
+  confirmedAt: string | null
+  transferredBy: string | null
+  transferredAt: string | null
+  approvedBy: string | null
+  approvedAt: string | null
+  capabilities: {
+    canRebuild: boolean
+    canConfirmHr: boolean
+    canTransferPayroll: boolean
+    canApprovePayroll: boolean
+  }
   details: SummaryTimesheetDetail[]
 }
 
@@ -598,6 +611,24 @@ export interface Payslip {
   deductions: number
   net: number
   components: PayrollComponent[]
+}
+
+export interface PayrollSheet {
+  period: string
+  status: SummaryTimesheetStatus
+  version: number
+  payslips: Payslip[]
+  capabilities: SummaryTimesheet['capabilities']
+}
+
+export interface PayrollAggregate {
+  period: string
+  status: SummaryTimesheetStatus
+  version: number
+  headcount: number
+  totalGross: number
+  totalNet: number
+  canApprove: boolean
 }
 
 /* ------------------------------ Thông báo --------------------------------- */

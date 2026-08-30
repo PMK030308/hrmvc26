@@ -51,3 +51,11 @@ export function RequirePermission({ permission, children }: { permission: string
   }
   return <>{children}</>
 }
+
+export function RequireAnyPermission({ permissions, children }: { permissions: string[]; children: ReactNode }) {
+  const user = useAuthStore((s) => s.user)!
+  if (!permissions.some((permission) => user.effectivePermissions?.includes(permission))) {
+    return <Navigate to={homeForRoles(user.roles)} replace />
+  }
+  return <>{children}</>
+}
