@@ -1,151 +1,180 @@
-// Dashboard routes (Admin/HR/Director) (§10 / §14.7)
 import { Router } from 'express'
 import { db } from '../db.js'
 import { requireAuth, requireRole, type AuthedRequest } from '../middleware/auth.js'
 import { pendingApprovals } from '../engines/request.js'
-import { mapPayslip } from '../repo.js'
 import { ymd, eachDayOfInterval, addDays, nowVn, parseISO } from '../lib/date.js'
+import { httpError } from '../types.js'
+import {
+  canViewAttendanceReportEmployee, canViewAttendanceReports, reportProjectionFor, REPORT_PERMISSIONS,
+} from '../authz/reportAuthorization.js'
+import { parseIsoDate, parsePeriod } from '../services/timesheetService.js'
 
 export const dashboardRouter = Router()
 
-dashboardRouter.get('/admin', requireAuth, requireRole('HR', 'Admin', 'Director'), (req: AuthedRequest, res) => {
-  const today = ymd(nowVn())
-  const activeEmps = (db.prepare('SELECT * FROM employees WHERE status=2').all() as any[])
-  const todayRecs = (db.prepare('SELECT * FROM attendance_records WHERE date=?').all(today) as any[])
-  const checkedIn = todayRecs.filter((r) => r.check_in_time != null).length
-  const onTime = todayRecs.filter((r) => r.status === 1).length
-  const late = todayRecs.filter((r) => r.late_minutes > 0).length
-  const absent = activeEmps.length - todayRecs.filter((r) => r.check_in_time != null).length
+function employeesForReport(req: AuthedRequest): any[] {
+  const actor = req.authorizationActor!
+  return (db.prepare('SELECT * FROM employees WHERE status=2').all() as any[])
+    .filter((employee) => canViewAttendanceReportEmployee(actor, { id: employee.id, departmentId: employee.department_id }))
+}
 
-  const byDepartment = (db.prepare('SELECT * FROM departments').all() as any[]).map((d) => {
-    const total = activeEmps.filter((e) => e.department_id === d.id).length
-    const present = todayRecs.filter((r) => {
-      const emp = (db.prepare('SELECT department_id FROM employees WHERE id=?').get(r.employee_id) as any)
-      return r.check_in_time != null && emp?.department_id === d.id
-    }).length
-    return { name: d.name, present, total }
-  })
+function requireAttendanceReport(req: AuthedRequest): void {
+  if (!canViewAttendanceReports(req.authorizationActor!)) throw httpError(403, 'Bạn không có quyền xem báo cáo chấm công.')
+}
 
-  const punchHourDistribution: { hour: string; count: number }[] = []
-  for (let h = 6; h <= 22; h++) {
-    const count = (db.prepare('SELECT * FROM punches WHERE date=?').all(today) as any[]).filter((p) => {
-      const hh = parseISO(p.punched_at).getHours()
-      return hh === h
-    }).length
-    punchHourDistribution.push({ hour: `${String(h).padStart(2, '0')}:00`, count })
-  }
+function validateRange(req: AuthedRequest, defaults?: { from: string; to: string }): { from: string; to: string } {
+  const from = parseIsoDate(req.query.from ?? defaults?.from, 'Từ ngày')
+  const to = parseIsoDate(req.query.to ?? defaults?.to, 'Đến ngày')
+  if (from > to) throw httpError(400, 'Khoảng ngày không hợp lệ.')
+  return { from, to }
+}
 
-  const onTimeTrend = eachDayOfInterval({ start: addDays(nowVn(), -6), end: nowVn() }).map((d) => {
-    const date = ymd(d)
-    const recs = (db.prepare('SELECT * FROM attendance_records WHERE date=?').all(date) as any[])
-    return { day: `${d.getDate()}/${d.getMonth() + 1}`, onTime: recs.filter((r) => r.status === 1).length, late: recs.filter((r) => r.late_minutes > 0).length }
-  })
-
-  const activityFeed = req.authorizationActor?.permissions.has('audit.view')
-    ? (db.prepare('SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 12').all() as any[]).map((a) => ({
-      kind: 'punch', title: a.detail, message: a.entity, actorName: a.user_name, timestamp: a.created_at,
+dashboardRouter.get('/admin', requireAuth, (req: AuthedRequest, res, next) => {
+  try {
+    requireAttendanceReport(req)
+    const today = ymd(nowVn())
+    const activeEmployees = employeesForReport(req)
+    const employeeIds = new Set(activeEmployees.map((employee) => employee.id))
+    const todayRecords = (db.prepare('SELECT * FROM attendance_records WHERE date=?').all(today) as any[])
+      .filter((record) => employeeIds.has(record.employee_id))
+    const checkedIn = todayRecords.filter((record) => record.check_in_time != null).length
+    const onTime = todayRecords.filter((record) => record.status === 1).length
+    const departments = db.prepare('SELECT * FROM departments').all() as any[]
+    const byDepartment = departments.map((department) => {
+      const departmentEmployees = activeEmployees.filter((employee) => employee.department_id === department.id)
+      const ids = new Set(departmentEmployees.map((employee) => employee.id))
+      return { name: department.name, present: todayRecords.filter((record) => ids.has(record.employee_id) && record.check_in_time != null).length, total: ids.size }
+    }).filter((department) => department.total > 0)
+    const punches = (db.prepare('SELECT * FROM punches WHERE date=?').all(today) as any[])
+      .filter((punch) => employeeIds.has(punch.employee_id))
+    const punchHourDistribution = Array.from({ length: 17 }, (_, index) => index + 6).map((hour) => ({
+      hour: `${String(hour).padStart(2, '0')}:00`,
+      count: punches.filter((punch) => parseISO(punch.punched_at).getHours() === hour).length,
     }))
-    : []
-
-  res.json({
-    kpi: {
-      employeesCheckedInToday: checkedIn, totalEmployees: activeEmps.length,
-      pendingApprovals: pendingApprovals(req.user!.id).length,
-      pendingPayrolls: (db.prepare('SELECT COUNT(*) c FROM summary_timesheets WHERE status=2 OR status=4').get() as any).c,
-      onTimeRate: checkedIn ? Math.round((onTime / checkedIn) * 100) : 0,
-      lateToday: late, absentToday: Math.max(0, absent),
-    },
-    byDepartment, punchHourDistribution, onTimeTrend, activityFeed,
-  })
+    const onTimeTrend = eachDayOfInterval({ start: addDays(nowVn(), -6), end: nowVn() }).map((dateValue) => {
+      const date = ymd(dateValue)
+      const records = (db.prepare('SELECT * FROM attendance_records WHERE date=?').all(date) as any[])
+        .filter((record) => employeeIds.has(record.employee_id))
+      return { day: `${dateValue.getDate()}/${dateValue.getMonth() + 1}`, onTime: records.filter((record) => record.status === 1).length, late: records.filter((record) => record.late_minutes > 0).length }
+    })
+    const activityFeed = req.authorizationActor!.permissions.has('audit.view')
+      ? (db.prepare('SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 12').all() as any[]).map((audit) => ({
+        kind: 'punch', title: audit.detail, message: audit.entity, actorName: audit.user_name, timestamp: audit.created_at,
+      })) : []
+    res.json({
+      kpi: {
+        employeesCheckedInToday: checkedIn, totalEmployees: activeEmployees.length,
+        pendingApprovals: pendingApprovals(req.user!.id).length,
+        pendingPayrolls: req.authorizationActor!.permissions.has(REPORT_PERMISSIONS.PAYROLL_VIEW_AGGREGATE)
+          ? (db.prepare('SELECT COUNT(*) count FROM summary_timesheets WHERE status IN (2,3,4)').get() as any).count : 0,
+        onTimeRate: checkedIn ? Math.round((onTime / checkedIn) * 100) : 0,
+        lateToday: todayRecords.filter((record) => record.late_minutes > 0).length,
+        absentToday: Math.max(0, activeEmployees.length - checkedIn),
+      },
+      byDepartment, punchHourDistribution, onTimeTrend, activityFeed,
+    })
+  } catch (error) { next(error) }
 })
 
 dashboardRouter.get('/director-approvals', requireAuth, requireRole('Director', 'Admin'), (req: AuthedRequest, res) => {
   res.json(pendingApprovals(req.user!.id))
 })
 
-dashboardRouter.get('/director-payrolls', requireAuth, requireRole('Director', 'Admin'), (_req, res) => {
-  const periods = Array.from(new Set((db.prepare('SELECT period FROM payslips').all() as any[]).map((p) => p.period))).sort((a, b) => b.localeCompare(a))
-  if (!periods.length) return res.json([])
-  res.json((db.prepare('SELECT * FROM payslips WHERE period=?').all(periods[0]) as any[]).map(mapPayslip))
+dashboardRouter.get('/director-payrolls', requireAuth, (req: AuthedRequest, res, next) => {
+  try {
+    if (!req.authorizationActor!.permissions.has(REPORT_PERMISSIONS.PAYROLL_VIEW_AGGREGATE)) throw httpError(403, 'Bạn không có quyền xem báo cáo lương.')
+    const summary = db.prepare('SELECT * FROM summary_timesheets WHERE status>=4 ORDER BY period DESC LIMIT 1').get() as any
+    if (!summary) return res.json(null)
+    const payslips = db.prepare('SELECT * FROM payslips WHERE period=?').all(summary.period) as any[]
+    res.json({
+      period: summary.period, status: summary.status, version: Number(summary.version ?? 1), headcount: payslips.length,
+      totalGross: payslips.reduce((sum, payslip) => sum + payslip.gross, 0),
+      totalNet: payslips.reduce((sum, payslip) => sum + payslip.net, 0),
+      canApprove: summary.status === 4 && req.authorizationActor!.permissions.has('payroll.sheet.approve'),
+    })
+  } catch (error) { next(error) }
 })
 
-dashboardRouter.get('/director-reports', requireAuth, requireRole('Director', 'Admin', 'HR'), (req, res) => {
-  const from = String(req.query.from), to = String(req.query.to)
-  const recs = (db.prepare('SELECT * FROM attendance_records WHERE date>=? AND date<=?').all(from, to) as any[])
-  const pays = (db.prepare('SELECT * FROM payslips').all() as any[])
-  const rows = (db.prepare('SELECT * FROM employees WHERE status=2').all() as any[]).map((e) => {
-    const er = recs.filter((r) => r.employee_id === e.id)
-    return {
-      name: e.full_name,
-      paidUnits: er.reduce((s, r) => s + (r.status === 4 ? 0 : r.work_hours), 0),
-      otHours: er.reduce((s, r) => s + r.overtime_hours, 0),
-      late: er.filter((r) => r.late_minutes > 0).length,
-      net: pays.filter((p) => p.employee_id === e.id).reduce((s, p) => s + p.net, 0),
+dashboardRouter.get('/director-reports', requireAuth, (req: AuthedRequest, res, next) => {
+  try {
+    requireAttendanceReport(req)
+    const { from, to } = validateRange(req)
+    const employees = employeesForReport(req)
+    const ids = new Set(employees.map((employee) => employee.id))
+    const records = (db.prepare('SELECT * FROM attendance_records WHERE date>=? AND date<=?').all(from, to) as any[])
+      .filter((record) => ids.has(record.employee_id))
+    const payslips = db.prepare('SELECT * FROM payslips').all() as any[]
+    const projection = reportProjectionFor(req.authorizationActor!)
+    const rows = employees.map((employee) => {
+      const employeeRecords = records.filter((record) => record.employee_id === employee.id)
+      const row: Record<string, any> = {
+        name: employee.full_name,
+        paidUnits: employeeRecords.reduce((sum, record) => sum + (record.status === 4 ? 0 : record.work_hours), 0),
+        otHours: employeeRecords.reduce((sum, record) => sum + record.overtime_hours, 0),
+        late: employeeRecords.filter((record) => record.late_minutes > 0).length,
+      }
+      if (projection === 'detail') row.net = payslips.filter((payslip) => payslip.employee_id === employee.id).reduce((sum, payslip) => sum + payslip.net, 0)
+      return row
+    })
+    const payroll = projection === 'attendance' ? null : {
+      totalNet: payslips.reduce((sum, payslip) => sum + payslip.net, 0),
+      totalGross: payslips.reduce((sum, payslip) => sum + payslip.gross, 0),
     }
-  })
-  res.json({ employees: rows })
+    res.json({ employees: rows, payroll, projection })
+  } catch (error) { next(error) }
 })
 
-/* --------- Dashboard mới: quỹ lương, giờ công TB, so sánh tháng --------- */
-
-// Quỹ lương theo phòng ban (kỳ payslip cho trước, mặc định kỳ mới nhất)
-dashboardRouter.get('/salary-fund', requireAuth, requireRole('HR', 'Admin', 'Director', 'Accountant'), (req, res) => {
-  let period = String(req.query.period ?? '')
-  if (!period) {
-    const periods = (db.prepare('SELECT DISTINCT period FROM payslips').all() as any[]).map((p) => p.period).sort((a, b) => b.localeCompare(a))
-    period = periods[0] ?? ''
-  }
-  const payslips = period ? (db.prepare('SELECT * FROM payslips WHERE period=?').all(period) as any[]) : []
-  const emps = (db.prepare('SELECT * FROM employees WHERE status=2').all() as any[])
-  const depts = (db.prepare('SELECT * FROM departments').all() as any[])
-  const byDepartment = depts.map((d) => {
-    const empIds = new Set(emps.filter((e) => e.department_id === d.id).map((e) => e.id))
-    const ps = payslips.filter((p) => empIds.has(p.employee_id))
-    return { name: d.name, net: ps.reduce((s, p) => s + p.net, 0), gross: ps.reduce((s, p) => s + p.gross, 0), headcount: empIds.size }
-  })
-  res.json({
-    period, byDepartment,
-    totalNet: payslips.reduce((s, p) => s + p.net, 0),
-    totalGross: payslips.reduce((s, p) => s + p.gross, 0),
-    totalBase: payslips.reduce((s, p) => s + p.base_salary, 0),
-    totalOt: payslips.reduce((s, p) => s + p.overtime, 0),
-  })
+dashboardRouter.get('/salary-fund', requireAuth, (req: AuthedRequest, res, next) => {
+  try {
+    if (!req.authorizationActor!.permissions.has(REPORT_PERMISSIONS.PAYROLL_VIEW_AGGREGATE)) throw httpError(403, 'Bạn không có quyền xem báo cáo lương.')
+    let period = req.query.period ? parsePeriod(req.query.period) : ''
+    if (!period) period = (db.prepare('SELECT period FROM payslips ORDER BY period DESC LIMIT 1').get() as any)?.period ?? ''
+    const payslips = period ? db.prepare('SELECT * FROM payslips WHERE period=?').all(period) as any[] : []
+    const employees = db.prepare('SELECT * FROM employees WHERE status=2').all() as any[]
+    const departments = db.prepare('SELECT * FROM departments').all() as any[]
+    const byDepartment = departments.map((department) => {
+      const employeeIds = new Set(employees.filter((employee) => employee.department_id === department.id).map((employee) => employee.id))
+      const rows = payslips.filter((payslip) => employeeIds.has(payslip.employee_id))
+      return { name: department.name, net: rows.reduce((sum, row) => sum + row.net, 0), gross: rows.reduce((sum, row) => sum + row.gross, 0), headcount: employeeIds.size }
+    })
+    res.json({
+      period, byDepartment,
+      totalNet: payslips.reduce((sum, row) => sum + row.net, 0), totalGross: payslips.reduce((sum, row) => sum + row.gross, 0),
+      totalBase: payslips.reduce((sum, row) => sum + row.base_salary, 0), totalOt: payslips.reduce((sum, row) => sum + row.overtime, 0),
+    })
+  } catch (error) { next(error) }
 })
 
-// Giờ công trung bình mỗi nhân viên (theo khoảng ngày)
-dashboardRouter.get('/work-hours-avg', requireAuth, requireRole('HR', 'Admin', 'Director', 'Accountant', 'Manager'), (req, res) => {
-  const today = ymd(nowVn())
-  const from = String(req.query.from ?? ymd(addDays(nowVn(), -29)))
-  const to = String(req.query.to ?? today)
-  const activeEmps = (db.prepare('SELECT * FROM employees WHERE status=2').all() as any[])
-  const recs = (db.prepare('SELECT * FROM attendance_records WHERE date>=? AND date<=?').all(from, to) as any[])
-  const depts = (db.prepare('SELECT * FROM departments').all() as any[])
-  const byDepartment = depts.map((d) => {
-    const empIds = activeEmps.filter((e) => e.department_id === d.id).map((e) => e.id)
-    if (empIds.length === 0) return { name: d.name, avgHours: 0, headcount: 0 }
-    const total = recs.filter((r) => empIds.includes(r.employee_id)).reduce((s, r) => s + r.actual_work_hours, 0)
-    return { name: d.name, avgHours: Math.round((total / empIds.length) * 10) / 10, headcount: empIds.length }
-  })
-  const overallTotal = recs.reduce((s, r) => s + r.actual_work_hours, 0)
-  res.json({
-    from, to,
-    overall: activeEmps.length ? Math.round((overallTotal / activeEmps.length) * 10) / 10 : 0,
-    byDepartment,
-  })
+dashboardRouter.get('/work-hours-avg', requireAuth, (req: AuthedRequest, res, next) => {
+  try {
+    requireAttendanceReport(req)
+    const today = ymd(nowVn())
+    const { from, to } = validateRange(req, { from: ymd(addDays(nowVn(), -29)), to: today })
+    const employees = employeesForReport(req)
+    const ids = new Set(employees.map((employee) => employee.id))
+    const records = (db.prepare('SELECT * FROM attendance_records WHERE date>=? AND date<=?').all(from, to) as any[])
+      .filter((record) => ids.has(record.employee_id))
+    const departments = db.prepare('SELECT * FROM departments').all() as any[]
+    const byDepartment = departments.map((department) => {
+      const employeeIds = employees.filter((employee) => employee.department_id === department.id).map((employee) => employee.id)
+      const total = records.filter((record) => employeeIds.includes(record.employee_id)).reduce((sum, record) => sum + record.actual_work_hours, 0)
+      return { name: department.name, avgHours: employeeIds.length ? Math.round((total / employeeIds.length) * 10) / 10 : 0, headcount: employeeIds.length }
+    }).filter((department) => department.headcount > 0)
+    const overallTotal = records.reduce((sum, record) => sum + record.actual_work_hours, 0)
+    res.json({ from, to, overall: employees.length ? Math.round((overallTotal / employees.length) * 10) / 10 : 0, byDepartment })
+  } catch (error) { next(error) }
 })
 
-// So sánh quỹ lương các kỳ (nửa tháng) — giải thích tháng nhiều/tháng ít do OT
-dashboardRouter.get('/salary-monthly', requireAuth, requireRole('HR', 'Admin', 'Director', 'Accountant'), (_req, res) => {
-  const periods = Array.from(new Set((db.prepare('SELECT period FROM payslips').all() as any[]).map((p) => p.period))).sort((a, b) => a.localeCompare(b))
-  const data = periods.map((period) => {
-    const ps = (db.prepare('SELECT * FROM payslips WHERE period=?').all(period) as any[])
-    return {
-      period,
-      totalNet: ps.reduce((s, p) => s + p.net, 0),
-      totalBase: ps.reduce((s, p) => s + p.base_salary, 0),
-      totalOt: ps.reduce((s, p) => s + p.overtime, 0),
-      label: `${period.slice(0, 4)}/${period.slice(4, 6)}/${period.slice(6, 7) === '1' ? 'H1' : 'H2'}`,
-    }
-  })
-  res.json({ periods: data })
+dashboardRouter.get('/salary-monthly', requireAuth, (req: AuthedRequest, res, next) => {
+  try {
+    if (!req.authorizationActor!.permissions.has(REPORT_PERMISSIONS.PAYROLL_VIEW_AGGREGATE)) throw httpError(403, 'Bạn không có quyền xem báo cáo lương.')
+    const periods = (db.prepare('SELECT DISTINCT period FROM payslips ORDER BY period ASC').all() as any[]).map((row) => row.period)
+    res.json({ periods: periods.map((period) => {
+      const rows = db.prepare('SELECT * FROM payslips WHERE period=?').all(period) as any[]
+      return {
+        period, totalNet: rows.reduce((sum, row) => sum + row.net, 0), totalBase: rows.reduce((sum, row) => sum + row.base_salary, 0),
+        totalOt: rows.reduce((sum, row) => sum + row.overtime, 0),
+        label: `${period.slice(0, 4)}/${period.slice(4, 6)}/${period.slice(6) === '1' ? 'H1' : 'H2'}`,
+      }
+    }) })
+  } catch (error) { next(error) }
 })

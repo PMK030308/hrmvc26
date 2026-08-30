@@ -56,4 +56,31 @@ export const SCHEMA_MIGRATIONS: readonly SchemaMigration[] = [
       if (!hasColumn(database, 'punches', 'proxy_reason')) database.exec('ALTER TABLE punches ADD COLUMN proxy_reason TEXT')
     },
   },
+  {
+    version: 3,
+    name: 'timesheet_payroll_workflow_integrity',
+    checksumSource: [
+      'summary_timesheets.version INTEGER NOT NULL DEFAULT 1',
+      'summary_timesheets.confirmed_by TEXT',
+      'summary_timesheets.confirmed_at TEXT',
+      'summary_timesheets.transferred_by TEXT',
+      'summary_timesheets.transferred_at TEXT',
+      'summary_timesheets.approved_by TEXT',
+      'summary_timesheets.approved_at TEXT',
+      'UNIQUE payslips(period,employee_id)',
+    ].join('\n'),
+    up(database) {
+      if (!hasColumn(database, 'summary_timesheets', 'version')) database.exec('ALTER TABLE summary_timesheets ADD COLUMN version INTEGER NOT NULL DEFAULT 1')
+      if (!hasColumn(database, 'summary_timesheets', 'confirmed_by')) database.exec('ALTER TABLE summary_timesheets ADD COLUMN confirmed_by TEXT')
+      if (!hasColumn(database, 'summary_timesheets', 'confirmed_at')) database.exec('ALTER TABLE summary_timesheets ADD COLUMN confirmed_at TEXT')
+      if (!hasColumn(database, 'summary_timesheets', 'transferred_by')) database.exec('ALTER TABLE summary_timesheets ADD COLUMN transferred_by TEXT')
+      if (!hasColumn(database, 'summary_timesheets', 'transferred_at')) database.exec('ALTER TABLE summary_timesheets ADD COLUMN transferred_at TEXT')
+      if (!hasColumn(database, 'summary_timesheets', 'approved_by')) database.exec('ALTER TABLE summary_timesheets ADD COLUMN approved_by TEXT')
+      if (!hasColumn(database, 'summary_timesheets', 'approved_at')) database.exec('ALTER TABLE summary_timesheets ADD COLUMN approved_at TEXT')
+      const duplicate = database.prepare(`SELECT period, employee_id, COUNT(*) count FROM payslips
+        GROUP BY period, employee_id HAVING COUNT(*) > 1 LIMIT 1`).get() as any
+      if (duplicate) throw new Error(`Không thể áp dụng migration: kỳ ${duplicate.period} có phiếu lương trùng cho nhân viên ${duplicate.employee_id}.`)
+      database.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_payslips_period_employee ON payslips(period, employee_id)')
+    },
+  },
 ]

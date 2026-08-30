@@ -228,7 +228,12 @@ export function mapSummaryTimesheet(r: any) {
     nightOtHours: num(d.night_ot_hours) ?? 0,
     confirmationStatus: d.confirmation_status, confirmationComment: str(d.confirmation_comment),
   }))
-  return { id: r.id, period: r.period, status: r.status, from: r.from_date, to: r.to_date, details }
+  return {
+    id: r.id, period: r.period, status: r.status, from: r.from_date, to: r.to_date,
+    version: Number(r.version ?? 1), confirmedBy: str(r.confirmed_by), confirmedAt: str(r.confirmed_at),
+    transferredBy: str(r.transferred_by), transferredAt: str(r.transferred_at),
+    approvedBy: str(r.approved_by), approvedAt: str(r.approved_at), details,
+  }
 }
 export const getSummary = (id: string) => {
   const r = db.prepare('SELECT * FROM summary_timesheets WHERE id = ?').get(id) as any

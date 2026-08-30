@@ -19,7 +19,7 @@ after(() => {
 
 test('phase 3 migration applies on a fresh initialized database', () => {
   initSchema()
-  assert.deepEqual(runMigrations(db).appliedVersions, [1, 2])
+  assert.deepEqual(runMigrations(db).appliedVersions, [1, 2, 3])
   const columns = new Set((db.prepare('PRAGMA table_info(punches)').all() as any[]).map((row) => row.name))
   assert.equal(columns.has('device_id'), true)
   assert.equal(columns.has('proxy_actor_user_id'), true)
@@ -42,8 +42,18 @@ test('phase 3 migration preserves legacy punch data while adding device and prox
       );
       INSERT INTO punches (id, employee_id, date, punched_at, source)
       VALUES ('legacy-punch', 'employee-1', '2026-08-01', '2026-08-01T08:00:00', 2);
+      CREATE TABLE summary_timesheets (
+        id TEXT PRIMARY KEY, period TEXT NOT NULL UNIQUE, status INTEGER NOT NULL DEFAULT 2,
+        from_date TEXT NOT NULL, to_date TEXT NOT NULL
+      );
+      CREATE TABLE payslips (
+        id TEXT PRIMARY KEY, period TEXT NOT NULL, employee_id TEXT NOT NULL, employee_name TEXT NOT NULL,
+        base_salary REAL NOT NULL DEFAULT 0, paid_work REAL NOT NULL DEFAULT 0, overtime REAL NOT NULL DEFAULT 0,
+        allowance REAL NOT NULL DEFAULT 0, gross REAL NOT NULL DEFAULT 0, deductions REAL NOT NULL DEFAULT 0,
+        net REAL NOT NULL DEFAULT 0, components TEXT NOT NULL DEFAULT '[]'
+      );
     `)
-    assert.deepEqual(runMigrations(legacy, SCHEMA_MIGRATIONS).appliedVersions, [1, 2])
+    assert.deepEqual(runMigrations(legacy, SCHEMA_MIGRATIONS).appliedVersions, [1, 2, 3])
     const punch = legacy.prepare(`SELECT id, employee_id, source, device_id, proxy_actor_user_id, proxy_reason
       FROM punches WHERE id='legacy-punch'`).get() as any
     assert.deepEqual(punch, {

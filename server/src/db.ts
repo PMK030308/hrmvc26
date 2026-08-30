@@ -313,7 +313,14 @@ export function initSchema(): void {
     period TEXT NOT NULL UNIQUE,
     status INTEGER NOT NULL DEFAULT 2,
     from_date TEXT NOT NULL,
-    to_date TEXT NOT NULL
+    to_date TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    confirmed_by TEXT,
+    confirmed_at TEXT,
+    transferred_by TEXT,
+    transferred_at TEXT,
+    approved_by TEXT,
+    approved_at TEXT
   );
 
   CREATE TABLE IF NOT EXISTS summary_timesheet_details (

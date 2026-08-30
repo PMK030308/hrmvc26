@@ -133,6 +133,7 @@ test('timesheet detail uses DB-fresh effective scope and empty scope denies', as
   insertAttendance('outsider-employee')
   insertAttendance('report-employee')
   setPermission('Manager', 'timesheet.detail.view_scoped', true)
+  setPermission('Manager', 'timesheet.detail.view_self', false)
 
   const scoped = await fetch(`${baseUrl}/timesheet/detailed?year=2026&month=8&half=1`, { headers: auth('manager') })
   assert.equal(scoped.status, 200)
@@ -157,7 +158,7 @@ test('summary list filters details by effective scope and requires explicit glob
   const scoped = await fetch(`${baseUrl}/timesheet/list-summary`, { headers: auth('manager') })
   const scopedBody = await scoped.json() as any[]
   assert.equal(scoped.status, 200)
-  const scopedIds = new Set(scopedBody[0].details.map((detail) => detail.employeeId))
+  const scopedIds = new Set(scopedBody[0].details.map((detail: any) => detail.employeeId))
   assert.equal(scopedIds.has('employee-employee'), true)
   assert.equal(scopedIds.has('report-employee'), true)
   assert.equal(scopedIds.has('outsider-employee'), false)
@@ -171,6 +172,7 @@ test('summary list filters details by effective scope and requires explicit glob
 })
 
 test('self payslip and payroll sheet permissions do not trust role names or JWT claims', async () => {
+  insertSummary(4)
   insertPayslip('employee-employee')
   insertPayslip('outsider-employee')
   setPermission('Employee', 'payroll.payslip.view_self', false)
