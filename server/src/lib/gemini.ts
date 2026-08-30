@@ -61,8 +61,8 @@ export async function generateContent(
   }
 
   if (!res.ok) {
-    const detail = await res.text().catch(() => '')
-    throw new Error(`Gemini trả ${res.status}: ${detail.slice(0, 500)}`)
+    await res.arrayBuffer().catch(() => undefined)
+    throw new Error(`Nhà cung cấp chatbot trả lỗi ${res.status}.`)
   }
   const data = await res.json()
   const cand = data?.candidates?.[0]

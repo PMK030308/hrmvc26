@@ -7,6 +7,9 @@ import { Router } from 'express'
 import { db } from '../db.js'
 import { requireAuth, requirePermission, type AuthedRequest } from '../middleware/auth.js'
 import { REQUEST_PERMISSIONS } from '../authz/requestAuthorization.js'
+import { CHATBOT_PERMISSIONS } from '../authz/chatbotAuthorization.js'
+import type { AuthorizationActor } from '../authz/authorizationActor.js'
+import { listEligibleShiftSwapPartners } from '../authz/shiftSwapPartnerAuthorization.js'
 import { httpError } from '../types.js'
 import { runChat, hasGeminiKey, type FunctionDeclaration, type GeminiContent } from '../lib/gemini.js'
 import { createRequest } from '../engines/request.js'
@@ -16,6 +19,7 @@ import {
 } from '../repo.js'
 import { ymd, nowVn, addDays, parseISO } from '../lib/date.js'
 import { pushAudit } from '../helpers.js'
+import { buildAuthorizedTools, executeAuthorizedTool, toGeminiHistory } from '../services/chatbotToolService.js'
 
 export const chatbotRouter = Router()
 
@@ -82,7 +86,7 @@ function resolveEmployeeByName(code: any): any | null {
     (r.email ?? '').toLowerCase().includes(q)) ?? null
 }
 
-function buildPayload(type: string, f: Record<string, any>): FieldErrors {
+function buildPayload(type: string, f: Record<string, any>, actor?: AuthorizationActor): FieldErrors {
   const errors: string[] = []
   const payload: Record<string, any> = {}
   const summary: Record<string, any> = { requestType: type, typeLabel: REQUEST_TYPE_LABEL[type] ?? type }
@@ -142,11 +146,12 @@ function buildPayload(type: string, f: Record<string, any>): FieldErrors {
     payload.shiftSwapMode = modeLabel.includes('đồng nghiệp') || modeLabel.includes('partner') ? 2 : 1
     summary.shiftSwapMode = payload.shiftSwapMode === 2 ? 'Đổi với đồng nghiệp' : 'Tự đổi ca'
     if (payload.shiftSwapMode === 2) {
-      let partner: any = null
-      if (f.suggestedSwapPartnerId) partner = db.prepare('SELECT * FROM employees WHERE id=?').get(f.suggestedSwapPartnerId) as any
-      if (!partner) partner = resolveEmployeeByName(f.partnerName ?? f.partner)
+      const partners = actor ? listEligibleShiftSwapPartners(actor) : []
+      const query = String(f.partnerName ?? f.partner ?? '').toLowerCase().trim()
+      const partner = partners.find((candidate) => candidate.id === f.suggestedSwapPartnerId)
+        ?? partners.find((candidate) => candidate.code.toLowerCase() === query || candidate.name.toLowerCase().includes(query))
       if (!partner) errors.push('tên/mã đồng nghiệp đổi ca')
-      else { payload.suggestedSwapPartnerId = partner.id; summary.partnerName = partner.full_name }
+      else { payload.suggestedSwapPartnerId = partner.id; summary.partnerName = partner.name }
     }
     payload.reason = f.reason ?? f.note ?? ''; summary.reason = payload.reason
   } else if (type === 'attendance-updates') {
@@ -408,15 +413,14 @@ function buildSystemPrompt(user: AuthedRequest['user']): string {
   const today = ymd(nowVn())
   const emp = getEmployee(user!.employeeId)
   const leaveTypes = (db.prepare('SELECT name FROM leave_types').all() as any[]).map((r) => r.name).join(', ')
-  const roleLabel = user!.roles.join(', ')
   return [
     'Bạn là "HRM Assistant" — trợ lý ảo của hệ thống chấm công HRM (công ty TechNova JSC).',
     'Trả lời bằng TIẾNG VIỆT, ngắn gọn, thân thiện, dùng markdown nhẹ (bullet, in đậm) khi cần.',
     '',
     `Hôm nay: ${today}.`,
-    `Người đang chat: ${emp?.fullName ?? user!.email} — vai trò: ${roleLabel}.`,
+    `Người đang chat: ${emp?.fullName ?? user!.email}.`,
     'Bạn có thể giúp 2 nhóm việc:',
-    ' 1) TRA CỨU THÔNG TIN: hồ sơ cá nhân, chấm công, đơn từ, quỹ phép, giờ OT. Nếu là quản lý/HR/Admin, có thể tra cứu nhân viên khác và tổng quan.',
+    ' 1) TRA CỨU THÔNG TIN: chỉ sử dụng các tool mà backend cung cấp cho phiên hiện tại.',
     ' 2) TẠO ĐƠN TỪ: nghỉ phép, muộn/sớm, làm thêm, công tác, đổi ca, cập nhật công.',
     '',
     'Quy ước:',
@@ -430,41 +434,44 @@ function buildSystemPrompt(user: AuthedRequest['user']): string {
 }
 
 /* --------------------------------- Routes --------------------------------- */
-chatbotRouter.post('/', requireAuth, async (req: AuthedRequest, res, next) => {
+chatbotRouter.post('/', requireAuth, requirePermission(CHATBOT_PERMISSIONS.USE), async (req: AuthedRequest, res, next) => {
   try {
     if (!hasGeminiKey()) return next(httpError(500, 'Chatbot chưa cấu hình GEMINI_API_KEY trên server.'))
     const { message, history } = req.body ?? {}
     if (!message || !String(message).trim()) return next(httpError(400, 'Thiếu nội dung tin nhắn.'))
 
     const user = req.user!
-    const tools = buildTools(user.roles)
+    const actor = req.authorizationActor!
+    const tools = buildAuthorizedTools(actor)
     let draft: any = null
     const onDraft = (d: any) => { draft = d }
 
-    const geminiHistory: GeminiContent[] = (Array.isArray(history) ? history : [])
-      .filter((m: any) => m?.role && m?.content)
-      .map((m: any) => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: String(m.content) }] }))
+    const geminiHistory = toGeminiHistory(history)
 
     const reply = await runChat({
       history: geminiHistory,
       userMessage: String(message),
       systemInstruction: buildSystemPrompt(user),
       tools,
-      onToolCall: makeToolExecutor(user.id, user.employeeId, user.roles, onDraft),
+      onToolCall: (name, args) => executeAuthorizedTool(actor, name, args, {
+        onDraft,
+        buildRequestDraft: (requestType, fields, freshActor) => buildPayload(requestType, fields, freshActor),
+      }),
     })
 
     res.json({ reply: reply || '(không có phản hồi)', draft })
   } catch (e: any) {
-    next(httpError(500, `Lỗi chatbot: ${e?.message ?? e}`))
+    if (e?.status) return next(e)
+    next(httpError(502, 'Dịch vụ chatbot tạm thời không khả dụng.'))
   }
 })
 
 // Xác nhận tạo đơn (sau khi người dùng bấm "Tạo đơn" trên thẻ nháp).
-chatbotRouter.post('/create', requireAuth, requirePermission(REQUEST_PERMISSIONS.CREATE_OWN), async (req: AuthedRequest, res, next) => {
+chatbotRouter.post('/create', requireAuth, requirePermission(CHATBOT_PERMISSIONS.USE), requirePermission(CHATBOT_PERMISSIONS.REQUEST_CREATE_SELF), requirePermission(REQUEST_PERMISSIONS.CREATE_OWN), async (req: AuthedRequest, res, next) => {
   try {
     const { requestType, fields } = req.body ?? {}
     if (!VALID_TYPES.includes(requestType)) return next(httpError(400, 'Loại đơn không hợp lệ.'))
-    const r = buildPayload(requestType, fields ?? {})
+    const r = buildPayload(requestType, fields ?? {}, req.authorizationActor!)
     if (!r.ok) return next(httpError(400, `Thiếu thông tin: ${r.errors.join(', ')}.`))
     const q = createRequest(req.user!.id, requestType as any, r.payload)
     const emp = getEmployee(req.user!.employeeId)!
@@ -480,6 +487,6 @@ chatbotRouter.post('/create', requireAuth, requirePermission(REQUEST_PERMISSIONS
 })
 
 // Tình trạng cấu hình (frontend dùng để ẩn/hiện widget).
-chatbotRouter.get('/status', requireAuth, (_req, res) => {
+chatbotRouter.get('/status', requireAuth, requirePermission(CHATBOT_PERMISSIONS.USE), (_req, res) => {
   res.json({ enabled: hasGeminiKey() })
 })

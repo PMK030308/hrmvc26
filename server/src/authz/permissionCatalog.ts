@@ -3,6 +3,7 @@ import { REQUEST_PERMISSIONS } from './requestAuthorization.js'
 import { ATTENDANCE_PERMISSIONS } from './attendanceAuthorization.js'
 import { DELEGATION_PERMISSIONS } from './delegationAuthorization.js'
 import { ORGANIZATION_PERMISSIONS } from './organizationAuthorization.js'
+import { CHATBOT_PERMISSIONS } from './chatbotAuthorization.js'
 
 export interface PermissionDefinition {
   key: string
@@ -83,7 +84,15 @@ export const PERMISSION_CATALOG: readonly PermissionDefinition[] = [
   { key: 'reports.payroll.view_aggregate', module: 'reports', label: 'Xem báo cáo lương tổng hợp', enforced: true, defaultRoles: ['Accountant', 'HR', 'Director', 'Admin'] },
   { key: 'reports.payroll.view_detail', module: 'reports', label: 'Xem báo cáo lương từng nhân viên', enforced: true, defaultRoles: ['Accountant', 'Admin'] },
   { key: 'audit.view', module: 'audit', label: 'Xem nhật ký hệ thống', enforced: false, defaultRoles: ['Admin'] },
-  { key: 'chatbot.use', module: 'chatbot', label: 'Sử dụng chatbot', enforced: false, defaultRoles: employee },
+  { key: CHATBOT_PERMISSIONS.USE, module: 'chatbot', label: 'Sử dụng chatbot', enforced: true, defaultRoles: employee },
+  { key: CHATBOT_PERMISSIONS.REQUEST_CREATE_SELF, module: 'chatbot', label: 'Tạo đơn của mình qua chatbot', enforced: true, defaultRoles: employee },
+  { key: CHATBOT_PERMISSIONS.EMPLOYEE_SEARCH_SCOPED, module: 'chatbot', label: 'Tra cứu nhân viên trong effective scope qua chatbot', enforced: true, defaultRoles: ['Manager', 'HR', 'Admin'] },
+  { key: CHATBOT_PERMISSIONS.ATTENDANCE_VIEW_SELF, module: 'chatbot', label: 'Xem chấm công của mình qua chatbot', enforced: true, defaultRoles: employee },
+  { key: CHATBOT_PERMISSIONS.ATTENDANCE_VIEW_SCOPED, module: 'chatbot', label: 'Xem chấm công theo effective scope qua chatbot', enforced: true, defaultRoles: ['Manager', 'HR', 'Admin'] },
+  { key: CHATBOT_PERMISSIONS.REQUEST_VIEW_SELF, module: 'chatbot', label: 'Xem đơn của mình qua chatbot', enforced: true, defaultRoles: employee },
+  { key: CHATBOT_PERMISSIONS.REQUEST_VIEW_SCOPED, module: 'chatbot', label: 'Xem đơn theo effective scope qua chatbot', enforced: true, defaultRoles: ['Manager', 'HR', 'Admin'] },
+  { key: CHATBOT_PERMISSIONS.LEAVE_BALANCE_VIEW_SELF, module: 'chatbot', label: 'Xem quỹ phép của mình qua chatbot', enforced: true, defaultRoles: employee },
+  { key: CHATBOT_PERMISSIONS.REPORT_VIEW_AGGREGATE, module: 'chatbot', label: 'Xem báo cáo tổng hợp qua chatbot', enforced: true, defaultRoles: ['HR', 'Director', 'Admin'] },
 ] as const
 
 const keys = new Set<string>()
