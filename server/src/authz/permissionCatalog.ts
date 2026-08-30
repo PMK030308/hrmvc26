@@ -1,6 +1,7 @@
 import type { RoleCode } from '../types.js'
 import { REQUEST_PERMISSIONS } from './requestAuthorization.js'
 import { ATTENDANCE_PERMISSIONS } from './attendanceAuthorization.js'
+import { DELEGATION_PERMISSIONS } from './delegationAuthorization.js'
 
 export interface PermissionDefinition {
   key: string
@@ -50,7 +51,10 @@ export const PERMISSION_CATALOG: readonly PermissionDefinition[] = [
   { key: 'shifts.schedule.manage_all', module: 'shifts', label: 'Phân ca toàn công ty', enforced: true, defaultRoles: ['Admin'] },
   { key: 'org.employee.view', module: 'org', label: 'Xem nhân viên', enforced: false, defaultRoles: ['Manager', 'HR', 'Admin'] },
   { key: 'org.employee.manage', module: 'org', label: 'Quản lý nhân viên', enforced: false, defaultRoles: ['HR', 'Admin'] },
-  { key: 'delegation.manage_own', module: 'delegation', label: 'Quản lý ủy quyền của mình', enforced: false, defaultRoles: approver },
+  { key: DELEGATION_PERMISSIONS.CREATE, module: 'delegation', label: 'Tạo ủy quyền duyệt', enforced: true, defaultRoles: approver },
+  { key: DELEGATION_PERMISSIONS.REVOKE_OWN, module: 'delegation', label: 'Thu hồi ủy quyền do mình tạo', enforced: true, defaultRoles: approver },
+  { key: DELEGATION_PERMISSIONS.REVOKE_ANY, module: 'delegation', label: 'Thu hồi ủy quyền của người khác', enforced: true, defaultRoles: [] },
+  { key: DELEGATION_PERMISSIONS.VIEW_ALL, module: 'delegation', label: 'Xem tất cả ủy quyền', enforced: true, defaultRoles: ['HR', 'Admin'] },
   { key: 'timesheet.view_own', module: 'timesheet', label: 'Xem bảng công của mình', enforced: false, defaultRoles: employee },
   { key: 'timesheet.view_scoped', module: 'timesheet', label: 'Xem bảng công theo scope', enforced: false, defaultRoles: ['Manager', 'HR', 'Admin'] },
   { key: 'payroll.view_own', module: 'payroll', label: 'Xem phiếu lương của mình', enforced: false, defaultRoles: employee },

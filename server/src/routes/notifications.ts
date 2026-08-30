@@ -4,6 +4,7 @@ import { db } from '../db.js'
 import { requireAuth, type AuthedRequest } from '../middleware/auth.js'
 import { mapNotification } from '../repo.js'
 import { isoNow } from '../lib/date.js'
+import { httpError } from '../types.js'
 
 export const notificationsRouter = Router()
 
@@ -13,9 +14,13 @@ notificationsRouter.get('/', requireAuth, (req: AuthedRequest, res) => {
   res.json({ items, unread: items.filter((n) => !n.isRead).length })
 })
 
-notificationsRouter.post('/mark-read/:id', requireAuth, (req: AuthedRequest, res) => {
-  db.prepare('UPDATE notifications SET is_read=1, read_at=? WHERE id=? AND recipient_user_id=?').run(isoNow(), req.params.id, req.user!.id)
-  res.json({ ok: true })
+notificationsRouter.post('/mark-read/:id', requireAuth, (req: AuthedRequest, res, next) => {
+  try {
+    const result = db.prepare('UPDATE notifications SET is_read=1, read_at=? WHERE id=? AND recipient_user_id=?')
+      .run(isoNow(), req.params.id, req.user!.id)
+    if (result.changes !== 1) throw httpError(404, 'Không tìm thấy thông báo.')
+    res.json({ ok: true })
+  } catch (error) { next(error) }
 })
 
 notificationsRouter.post('/mark-all-read', requireAuth, (req: AuthedRequest, res) => {
