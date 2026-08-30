@@ -41,9 +41,11 @@ dashboardRouter.get('/admin', requireAuth, requireRole('HR', 'Admin', 'Director'
     return { day: `${d.getDate()}/${d.getMonth() + 1}`, onTime: recs.filter((r) => r.status === 1).length, late: recs.filter((r) => r.late_minutes > 0).length }
   })
 
-  const activityFeed = (db.prepare('SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 12').all() as any[]).map((a) => ({
-    kind: 'punch', title: a.detail, message: a.entity, actorName: a.user_name, timestamp: a.created_at,
-  }))
+  const activityFeed = req.authorizationActor?.permissions.has('audit.view')
+    ? (db.prepare('SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 12').all() as any[]).map((a) => ({
+      kind: 'punch', title: a.detail, message: a.entity, actorName: a.user_name, timestamp: a.created_at,
+    }))
+    : []
 
   res.json({
     kpi: {

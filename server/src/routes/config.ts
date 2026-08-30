@@ -1,7 +1,8 @@
 // Config routes: quy định chấm công, loại nghỉ, role/permission, profile (§9/§11)
 import { Router } from 'express'
+import { z } from 'zod'
 import { db } from '../db.js'
-import { requireAuth, requirePermission, requireRole, type AuthedRequest } from '../middleware/auth.js'
+import { requireAuth, requirePermission, type AuthedRequest } from '../middleware/auth.js'
 import { getRegulation, mapRegulation, getEmployee, getUserById, mapUser, uid } from '../repo.js'
 import { httpError } from '../types.js'
 import { pushAudit } from '../helpers.js'
@@ -9,19 +10,55 @@ import {
   getPermissionMatrixSnapshot, replacePermissionMatrix, updateAuthorizationUser, validateGenericPermissionMatrix,
   ALL_ROLES, type PermissionMatrixEntry,
 } from '../services/permissionService.js'
+import { loadAuthorizationActor } from '../authz/authorizationActor.js'
 
 export const configRouter = Router()
 
+const gpsCatalogSchema = z.object({
+  id: z.string().min(1).optional(), name: z.string().trim().min(1).max(100),
+  lat: z.number().finite().min(-90).max(90), lng: z.number().finite().min(-180).max(180),
+  radiusMeters: z.number().int().positive().max(100000),
+})
+const wifiCatalogSchema = z.object({
+  id: z.string().min(1).optional(), ssid: z.string().trim().min(1).max(100), bssid: z.string().trim().max(100).nullable().optional(),
+})
+const ipCatalogSchema = z.object({
+  id: z.string().min(1).optional(), ipAddress: z.string().trim().min(1).max(100), subnetBits: z.number().int().min(0).max(128),
+})
+const regulationSchema = z.object({
+  enablePunchFace: z.boolean().optional(), enablePunchGps: z.boolean().optional(), enablePunchWifi: z.boolean().optional(),
+  enablePunchIp: z.boolean().optional(), enablePunchQr: z.boolean().optional(), requireLivenessCheck: z.boolean().optional(),
+  livenessStrictness: z.number().int().min(0).max(10).optional(), alternativePunchMethod: z.number().int().nullable().optional(),
+  canEmployeeTrackWorkHours: z.boolean().optional(), allowEmployeeShiftRegistration: z.boolean().optional(),
+  allowEmployeeViewDetailTimesheetDaily: z.boolean().optional(), duplicateWindowSeconds: z.number().int().nonnegative().optional(),
+  otMonthlyCapHours: z.number().nonnegative().optional(), otYearlyCapHours: z.number().nonnegative().optional(),
+  weekdayOtCoeff: z.number().nonnegative().optional(), weekendOtCoeff: z.number().nonnegative().optional(),
+  holidayOtCoeff: z.number().nonnegative().optional(), nightCoeff: z.number().nonnegative().optional(),
+  nightOtExtra: z.number().nonnegative().optional(), standardMonthlyHours: z.number().positive().optional(),
+  gpsCatalog: z.array(gpsCatalogSchema).max(500).optional(), wifiCatalog: z.array(wifiCatalogSchema).max(500).optional(),
+  ipCatalog: z.array(ipCatalogSchema).max(500).optional(),
+})
+const leaveTypeSchema = z.object({
+  name: z.string().trim().min(1).max(100).optional(), category: z.number().int().positive().optional(),
+  fundType: z.number().int().positive().optional(), maxDays: z.number().int().nonnegative().nullable().optional(),
+  requireAttachment: z.boolean().optional(), requireReason: z.boolean().optional(),
+  dayCalculationType: z.number().int().positive().optional(),
+}).refine((value) => Object.keys(value).length > 0, { message: 'Không có dữ liệu cần cập nhật.' })
+const createUserSchema = z.object({
+  email: z.string().trim().email().max(200), employeeId: z.string().min(1),
+  roles: z.array(z.string().min(1)).min(1),
+})
+
 /* ------------------------------ Quy định ---------------------------------- */
-configRouter.get('/regulations/attendance', requireAuth, requireRole('HR', 'Admin', 'Manager'), (_req, res) => {
+configRouter.get('/regulations/attendance', requireAuth, requirePermission('config.regulation.view'), (_req, res) => {
   res.json(getRegulation())
 })
 
-configRouter.put('/regulations/attendance', requireAuth, requireRole('HR', 'Admin'), (req: AuthedRequest, res, next) => {
+configRouter.put('/regulations/attendance', requireAuth, requirePermission('config.regulation.manage'), (req: AuthedRequest, res, next) => {
   try {
-    const reg = db.prepare('SELECT * FROM regulation LIMIT 1').get() as any
-    if (!reg) throw httpError(404, 'Chưa có quy định.')
-    const p = req.body ?? {}
+    const parsed = regulationSchema.safeParse(req.body ?? {})
+    if (!parsed.success) throw httpError(400, parsed.error.issues[0]?.message ?? 'Quy định không hợp lệ.')
+    const p = parsed.data
     const map: Record<string, string> = {
       enablePunchFace: 'enable_punch_face', enablePunchGps: 'enable_punch_gps', enablePunchWifi: 'enable_punch_wifi',
       enablePunchIp: 'enable_punch_ip', enablePunchQr: 'enable_punch_qr', requireLivenessCheck: 'require_liveness_check',
@@ -39,57 +76,74 @@ configRouter.put('/regulations/attendance', requireAuth, requireRole('HR', 'Admi
       nightOtExtra: 'night_ot_extra',
       standardMonthlyHours: 'standard_monthly_hours',
     }
-    const sets: string[] = [], vals: any[] = []
-    for (const k of Object.keys(map)) {
-      if (k in p) {
-        const col = map[k]
-        if (col.startsWith('enable_') || col.startsWith('require_') || col.startsWith('can_') || col.startsWith('allow_')) {
-          sets.push(`${col}=?`); vals.push(p[k] ? 1 : 0)
-        } else { sets.push(`${col}=?`); vals.push(p[k]) }
+    const save = db.transaction(() => {
+      const actor = loadAuthorizationActor(req.user!.id)
+      if (!actor.permissions.has('config.regulation.manage')) throw httpError(403, 'Bạn không có quyền cập nhật quy định.')
+      const reg = db.prepare('SELECT * FROM regulation LIMIT 1').get() as any
+      if (!reg) throw httpError(404, 'Chưa có quy định.')
+      const sets: string[] = [], vals: any[] = []
+      for (const k of Object.keys(map)) {
+        if (k in p) {
+          const col = map[k]
+          if (col.startsWith('enable_') || col.startsWith('require_') || col.startsWith('can_') || col.startsWith('allow_')) {
+            sets.push(`${col}=?`); vals.push((p as any)[k] ? 1 : 0)
+          } else { sets.push(`${col}=?`); vals.push((p as any)[k]) }
+        }
       }
-    }
-    if (sets.length) { vals.push(reg.id); db.prepare(`UPDATE regulation SET ${sets.join(',')} WHERE id=?`).run(...vals) }
-    // Catalogs
-    if (Array.isArray(p.gpsCatalog)) {
-      db.prepare('DELETE FROM gps_catalog WHERE regulation_id=?').run(reg.id)
-      p.gpsCatalog.forEach((g: any) => db.prepare('INSERT INTO gps_catalog (id, regulation_id, name, lat, lng, radius_meters) VALUES (?,?,?,?,?,?)').run(g.id ?? uid('gps'), reg.id, g.name, g.lat, g.lng, g.radiusMeters))
-    }
-    if (Array.isArray(p.wifiCatalog)) {
-      db.prepare('DELETE FROM wifi_catalog WHERE regulation_id=?').run(reg.id)
-      p.wifiCatalog.forEach((w: any) => db.prepare('INSERT INTO wifi_catalog (id, regulation_id, ssid, bssid) VALUES (?,?,?,?)').run(w.id ?? uid('wifi'), reg.id, w.ssid, w.bssid ?? null))
-    }
-    if (Array.isArray(p.ipCatalog)) {
-      db.prepare('DELETE FROM ip_catalog WHERE regulation_id=?').run(reg.id)
-      p.ipCatalog.forEach((i: any) => db.prepare('INSERT INTO ip_catalog (id, regulation_id, ip_address, subnet_bits) VALUES (?,?,?,?)').run(i.id ?? uid('ip'), reg.id, i.ipAddress, i.subnetBits))
-    }
-    pushAudit(req.user!.id, req.user!.email, 2, 'Regulation', null, 'Cập nhật quy định chấm công')
-    res.json(getRegulation())
+      if (sets.length) { vals.push(reg.id); db.prepare(`UPDATE regulation SET ${sets.join(',')} WHERE id=?`).run(...vals) }
+      if (p.gpsCatalog) {
+        db.prepare('DELETE FROM gps_catalog WHERE regulation_id=?').run(reg.id)
+        for (const g of p.gpsCatalog) db.prepare('INSERT INTO gps_catalog (id, regulation_id, name, lat, lng, radius_meters) VALUES (?,?,?,?,?,?)')
+          .run(g.id ?? uid('gps'), reg.id, g.name, g.lat, g.lng, g.radiusMeters)
+      }
+      if (p.wifiCatalog) {
+        db.prepare('DELETE FROM wifi_catalog WHERE regulation_id=?').run(reg.id)
+        for (const w of p.wifiCatalog) db.prepare('INSERT INTO wifi_catalog (id, regulation_id, ssid, bssid) VALUES (?,?,?,?)')
+          .run(w.id ?? uid('wifi'), reg.id, w.ssid, w.bssid ?? null)
+      }
+      if (p.ipCatalog) {
+        db.prepare('DELETE FROM ip_catalog WHERE regulation_id=?').run(reg.id)
+        for (const item of p.ipCatalog) db.prepare('INSERT INTO ip_catalog (id, regulation_id, ip_address, subnet_bits) VALUES (?,?,?,?)')
+          .run(item.id ?? uid('ip'), reg.id, item.ipAddress, item.subnetBits)
+      }
+      pushAudit(actor.userId, actor.email, 2, 'Regulation', null, 'Cập nhật quy định chấm công')
+      return getRegulation()
+    })
+    res.json(save.immediate())
   } catch (e) { next(e) }
 })
 
 /* ------------------------------- Loại nghỉ -------------------------------- */
-configRouter.get('/leave-types', requireAuth, requireRole('HR', 'Admin'), (_req, res) => {
+configRouter.get('/leave-types', requireAuth, requirePermission('config.leave_type.view'), (_req, res) => {
   res.json((db.prepare('SELECT * FROM leave_types').all() as any[]).map((r) => ({
     id: r.id, name: r.name, category: r.category, fundType: r.fund_type, maxDays: r.max_days,
     requireAttachment: !!r.require_attachment, requireReason: !!r.require_reason, dayCalculationType: r.day_calculation_type,
   })))
 })
 
-configRouter.put('/leave-types/:id', requireAuth, requireRole('HR', 'Admin'), (req: AuthedRequest, res, next) => {
+configRouter.put('/leave-types/:id', requireAuth, requirePermission('config.leave_type.manage'), (req: AuthedRequest, res, next) => {
   try {
-    const row = db.prepare('SELECT * FROM leave_types WHERE id=?').get(req.params.id) as any
-    if (!row) throw httpError(404, 'Không tìm thấy loại nghỉ.')
-    const p = req.body ?? {}
+    const parsed = leaveTypeSchema.safeParse(req.body ?? {})
+    if (!parsed.success) throw httpError(400, parsed.error.issues[0]?.message ?? 'Loại nghỉ không hợp lệ.')
+    const p = parsed.data
     const map: Record<string, string> = {
       name: 'name', category: 'category', fundType: 'fund_type', maxDays: 'max_days',
       requireReason: 'require_reason', dayCalculationType: 'day_calculation_type',
     }
-    const sets: string[] = [], vals: any[] = []
-    for (const k of Object.keys(map)) if (k in p) { sets.push(`${map[k]}=?`); vals.push(p[k]) }
-    if ('requireAttachment' in p) { sets.push('require_attachment=?'); vals.push(p.requireAttachment ? 1 : 0) }
-    if (sets.length) { vals.push(req.params.id); db.prepare(`UPDATE leave_types SET ${sets.join(',')} WHERE id=?`).run(...vals) }
-    pushAudit(req.user!.id, req.user!.email, 2, 'LeaveType', req.params.id, `Cập nhật loại nghỉ ${p.name ?? row.name}`)
-    res.json({ ...row, ...p })
+    const save = db.transaction(() => {
+      const actor = loadAuthorizationActor(req.user!.id)
+      if (!actor.permissions.has('config.leave_type.manage')) throw httpError(403, 'Bạn không có quyền cập nhật loại nghỉ.')
+      const row = db.prepare('SELECT * FROM leave_types WHERE id=?').get(req.params.id) as any
+      if (!row) throw httpError(404, 'Không tìm thấy loại nghỉ.')
+      const sets: string[] = [], vals: any[] = []
+      for (const k of Object.keys(map)) if (k in p) { sets.push(`${map[k]}=?`); vals.push((p as any)[k]) }
+      if ('requireAttachment' in p) { sets.push('require_attachment=?'); vals.push(p.requireAttachment ? 1 : 0) }
+      vals.push(req.params.id)
+      db.prepare(`UPDATE leave_types SET ${sets.join(',')} WHERE id=?`).run(...vals)
+      pushAudit(actor.userId, actor.email, 2, 'LeaveType', req.params.id, `Cập nhật loại nghỉ ${p.name ?? row.name}`)
+      return (db.prepare('SELECT * FROM leave_types WHERE id=?').get(req.params.id) as any)
+    })
+    res.json(save.immediate())
   } catch (e) { next(e) }
 })
 
@@ -131,20 +185,25 @@ configRouter.put('/roles/users/:userId', requireAuth, requirePermission('config.
 
 configRouter.post('/roles/users', requireAuth, requirePermission('config.user.manage'), (req: AuthedRequest, res, next) => {
   try {
-    const { email, employeeId, roles } = req.body ?? {}
-    if (typeof email !== 'string' || !email.includes('@') || typeof employeeId !== 'string') {
-      throw httpError(400, 'Thông tin tài khoản không hợp lệ.')
-    }
-    if (!Array.isArray(roles) || roles.length === 0 || new Set(roles).size !== roles.length || roles.some((role) => !ALL_ROLES.includes(role))) {
+    const parsed = createUserSchema.safeParse(req.body ?? {})
+    if (!parsed.success) throw httpError(400, 'Thông tin tài khoản không hợp lệ.')
+    const { email, employeeId, roles } = parsed.data
+    if (roles.length === 0 || new Set(roles).size !== roles.length || roles.some((role) => !ALL_ROLES.includes(role as any))) {
       throw httpError(400, 'Danh sách vai trò không hợp lệ.')
     }
-    if (!getEmployee(employeeId)) throw httpError(404, 'Không tìm thấy nhân viên liên kết.')
-    const id = uid('usr')
-    const perms = ['View']
-    db.prepare('INSERT INTO users (id, email, employee_id, password_hash, roles, permissions, department_scopes) VALUES (?,?,?,?,?,?,?)')
-      .run(id, email, employeeId, '$2a$10$placeholderhashforcreateduser000000000000000000000', JSON.stringify(roles), JSON.stringify(perms), '[]')
-    pushAudit(req.user!.id, req.user!.email, 1, 'User', id, `Tạo tài khoản ${email}`)
-    res.json(mapUser(db.prepare('SELECT * FROM users WHERE id=?').get(id) as any))
+    const create = db.transaction(() => {
+      const actor = loadAuthorizationActor(req.user!.id)
+      if (!actor.permissions.has('config.user.manage')) throw httpError(403, 'Bạn không có quyền tạo tài khoản.')
+      if (!getEmployee(employeeId)) throw httpError(404, 'Không tìm thấy nhân viên liên kết.')
+      if (db.prepare('SELECT 1 FROM users WHERE LOWER(email)=LOWER(?)').get(email)) throw httpError(409, 'Email tài khoản đã tồn tại.')
+      if (db.prepare('SELECT 1 FROM users WHERE employee_id=?').get(employeeId)) throw httpError(409, 'Nhân viên đã được liên kết với tài khoản khác.')
+      const id = uid('usr')
+      db.prepare('INSERT INTO users (id, email, employee_id, password_hash, roles, permissions, department_scopes) VALUES (?,?,?,?,?,?,?)')
+        .run(id, email.toLowerCase(), employeeId, '$2a$10$placeholderhashforcreateduser000000000000000000000', JSON.stringify(roles), '[]', '[]')
+      pushAudit(actor.userId, actor.email, 1, 'User', id, `Tạo tài khoản ${email}`)
+      return mapUser(db.prepare('SELECT * FROM users WHERE id=?').get(id) as any)
+    })
+    res.json(create.immediate())
   } catch (e) { next(e) }
 })
 
