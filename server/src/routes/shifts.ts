@@ -1,20 +1,21 @@
 // Shifts routes (§7)
 import { Router } from 'express'
 import { db } from '../db.js'
-import { requireAuth, requireRole, type AuthedRequest } from '../middleware/auth.js'
-import { allShifts, getShift, mapShift, mapShiftSchedule, uid } from '../repo.js'
+import { requireAuth, requirePermission, type AuthedRequest } from '../middleware/auth.js'
+import { allShifts, getEmployee, getShift, mapShift, mapShiftSchedule, uid } from '../repo.js'
 import { httpError } from '../types.js'
 import { pushAudit } from '../helpers.js'
 import { recomputeAll } from '../engines/attendance.js'
 import { ymd, eachDayOfInterval } from '../lib/date.js'
+import { canManageShiftSchedule, canViewShiftSchedule, SHIFT_PERMISSIONS } from '../authz/shiftAuthorization.js'
 
 export const shiftsRouter = Router()
 
-shiftsRouter.get('/', requireAuth, requireRole('HR', 'Admin', 'Manager'), (_req, res) => {
+shiftsRouter.get('/', requireAuth, requirePermission(SHIFT_PERMISSIONS.CATALOG_VIEW), (_req, res) => {
   res.json(allShifts())
 })
 
-shiftsRouter.post('/', requireAuth, requireRole('HR', 'Admin'), (req: AuthedRequest, res) => {
+shiftsRouter.post('/', requireAuth, requirePermission(SHIFT_PERMISSIONS.CATALOG_MANAGE), (req: AuthedRequest, res) => {
   const p = req.body ?? {}
   const id = uid('shift')
   db.prepare(`INSERT INTO shifts (id, code, name, start_time, end_time, break_start_time, break_end_time,
@@ -32,8 +33,9 @@ shiftsRouter.post('/', requireAuth, requireRole('HR', 'Admin'), (req: AuthedRequ
   res.json(s)
 })
 
-shiftsRouter.put('/:id', requireAuth, requireRole('HR', 'Admin'), (req: AuthedRequest, res, next) => {
+shiftsRouter.put('/:id', requireAuth, requirePermission(SHIFT_PERMISSIONS.CATALOG_MANAGE), (req: AuthedRequest, res, next) => {
   try {
+    const updated = db.transaction(() => {
     const s = getShift(req.params.id)
     if (!s) throw httpError(404, 'Không tìm thấy ca.')
     const p = req.body ?? {}
@@ -54,55 +56,91 @@ shiftsRouter.put('/:id', requireAuth, requireRole('HR', 'Admin'), (req: AuthedRe
     ;(db.prepare('SELECT DISTINCT employee_id FROM shift_schedules WHERE shift_id=?').all(req.params.id) as any[])
       .forEach((r) => recomputeAll(r.employee_id))
     pushAudit(req.user!.id, req.user!.email, 2, 'Shift', req.params.id, `Cập nhật ca ${getShift(req.params.id)!.name}`)
-    res.json(getShift(req.params.id))
+    return getShift(req.params.id)
+    })()
+    res.json(updated)
   } catch (e) { next(e) }
 })
 
-shiftsRouter.delete('/:id', requireAuth, requireRole('HR', 'Admin'), (req: AuthedRequest, res) => {
-  db.prepare('DELETE FROM shift_schedules WHERE shift_id=?').run(req.params.id)
-  db.prepare('DELETE FROM shifts WHERE id=?').run(req.params.id)
-  pushAudit(req.user!.id, req.user!.email, 3, 'Shift', req.params.id, `Xóa ca ${req.params.id}`)
-  res.json({ ok: true })
+shiftsRouter.delete('/:id', requireAuth, requirePermission(SHIFT_PERMISSIONS.CATALOG_MANAGE), (req: AuthedRequest, res, next) => {
+  try {
+    db.transaction(() => {
+      if (!getShift(req.params.id)) throw httpError(404, 'Không tìm thấy ca.')
+      const employeeIds = (db.prepare('SELECT DISTINCT employee_id FROM shift_schedules WHERE shift_id=?').all(req.params.id) as any[])
+      db.prepare('DELETE FROM shift_schedules WHERE shift_id=?').run(req.params.id)
+      db.prepare('DELETE FROM shifts WHERE id=?').run(req.params.id)
+      employeeIds.forEach((row) => recomputeAll(row.employee_id))
+      pushAudit(req.user!.id, req.user!.email, 3, 'Shift', req.params.id, `Xóa ca ${req.params.id}`)
+    })()
+    res.json({ ok: true })
+  } catch (error) { next(error) }
 })
 
-shiftsRouter.get('/schedule', requireAuth, requireRole('HR', 'Admin', 'Manager'), (req, res) => {
-  const year = Number(req.query.year), month = Number(req.query.month)
-  const from = new Date(year, month - 1, 1)
-  const to = new Date(year, month, 0)
-  const days = eachDayOfInterval({ start: from, end: to }).map((d) => ymd(d))
-  let emps = (db.prepare('SELECT * FROM employees WHERE status=2').all() as any[])
-  if (req.query.departmentId) emps = emps.filter((e) => e.department_id === req.query.departmentId)
-  const schedules: Record<string, Record<string, any>> = {}
-  for (const e of emps) {
-    schedules[e.id] = {}
-    for (const d of days) {
-      const r = db.prepare('SELECT * FROM shift_schedules WHERE employee_id=? AND date=? AND is_active=1').get(e.id, d) as any
-      schedules[e.id][d] = r ? mapShiftSchedule(r) : null
+shiftsRouter.get('/schedule', requireAuth, (req: AuthedRequest, res, next) => {
+  try {
+    const actor = req.authorizationActor!
+    const year = Number(req.query.year), month = Number(req.query.month)
+    if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) throw httpError(400, 'Tháng hoặc năm không hợp lệ.')
+    const from = new Date(year, month - 1, 1)
+    const to = new Date(year, month, 0)
+    const days = eachDayOfInterval({ start: from, end: to }).map((d) => ymd(d))
+    let emps = (db.prepare('SELECT * FROM employees WHERE status IN (1,2,3)').all() as any[])
+      .filter((employee) => canViewShiftSchedule(actor, { id: employee.id, departmentId: employee.department_id }))
+    if (req.query.departmentId) emps = emps.filter((e) => e.department_id === req.query.departmentId)
+    if (emps.length === 0 && !actor.permissions.has(SHIFT_PERMISSIONS.SCHEDULE_VIEW_ALL)) {
+      throw httpError(403, 'Bạn không có effective scope để xem lịch làm việc.')
     }
-  }
-  res.json({ employees: emps.map((e) => ({ id: e.id, employeeCode: e.employee_code, firstName: e.first_name, lastName: e.last_name, fullName: e.full_name, departmentId: e.department_id, positionId: e.position_id, status: e.status })), days, schedules })
-})
-
-shiftsRouter.post('/assign', requireAuth, requireRole('HR', 'Admin'), (req: AuthedRequest, res) => {
-  const { employeeId, date, shiftId } = req.body ?? {}
-  db.prepare('DELETE FROM shift_schedules WHERE employee_id=? AND date=?').run(employeeId, date)
-  if (shiftId) {
-    db.prepare('INSERT INTO shift_schedules (id, employee_id, shift_id, date, rule_id, is_active) VALUES (?,?,?,?,NULL,1)').run(uid('sch'), employeeId, shiftId, date)
-    recomputeAll(employeeId)
-  }
-  pushAudit(req.user!.id, req.user!.email, 2, 'ShiftSchedule', null, `Phân ca ${employeeId} ${date}`)
-  res.json({ ok: true })
-})
-
-shiftsRouter.post('/bulk-assign', requireAuth, requireRole('HR', 'Admin'), (req: AuthedRequest, res) => {
-  const { employeeIds, shiftId, dates } = req.body ?? {}
-  for (const eid of employeeIds) {
-    for (const d of dates) {
-      db.prepare('DELETE FROM shift_schedules WHERE employee_id=? AND date=?').run(eid, d)
-      db.prepare('INSERT INTO shift_schedules (id, employee_id, shift_id, date, rule_id, is_active) VALUES (?,?,?,?,NULL,1)').run(uid('sch'), eid, shiftId, d)
+    const schedules: Record<string, Record<string, any>> = {}
+    for (const e of emps) {
+      schedules[e.id] = {}
+      for (const d of days) {
+        const r = db.prepare('SELECT * FROM shift_schedules WHERE employee_id=? AND date=? AND is_active=1').get(e.id, d) as any
+        schedules[e.id][d] = r ? mapShiftSchedule(r) : null
+      }
     }
-    recomputeAll(eid)
-  }
-  pushAudit(req.user!.id, req.user!.email, 2, 'ShiftSchedule', null, `Phân ca hàng loạt (${employeeIds.length} NV)`)
-  res.json({ ok: true })
+    res.json({ employees: emps.map((e) => ({ id: e.id, employeeCode: e.employee_code, firstName: e.first_name, lastName: e.last_name, fullName: e.full_name, departmentId: e.department_id, positionId: e.position_id, status: e.status })), days, schedules })
+  } catch (error) { next(error) }
+})
+
+shiftsRouter.post('/assign', requireAuth, (req: AuthedRequest, res, next) => {
+  try {
+    const { employeeId, date, shiftId } = req.body ?? {}
+    db.transaction(() => {
+      const target = getEmployee(employeeId)
+      if (!target || ![1, 2, 3].includes(target.status)) throw httpError(404, 'Không tìm thấy nhân viên.')
+      if (!canManageShiftSchedule(req.authorizationActor!, { id: target.id, departmentId: target.departmentId })) throw httpError(404, 'Không tìm thấy nhân viên.')
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date))) throw httpError(400, 'Ngày phân ca không hợp lệ.')
+      if (shiftId && !getShift(shiftId)) throw httpError(404, 'Không tìm thấy ca.')
+      db.prepare('DELETE FROM shift_schedules WHERE employee_id=? AND date=?').run(employeeId, date)
+      if (shiftId) db.prepare('INSERT INTO shift_schedules (id, employee_id, shift_id, date, rule_id, is_active) VALUES (?,?,?,?,NULL,1)').run(uid('sch'), employeeId, shiftId, date)
+      recomputeAll(employeeId)
+      pushAudit(req.user!.id, req.user!.email, 2, 'ShiftSchedule', null, `Phân ca ${employeeId} ${date}`)
+    })()
+    res.json({ ok: true })
+  } catch (error) { next(error) }
+})
+
+shiftsRouter.post('/bulk-assign', requireAuth, (req: AuthedRequest, res, next) => {
+  try {
+    const { employeeIds, shiftId, dates } = req.body ?? {}
+    if (!Array.isArray(employeeIds) || employeeIds.length === 0 || !Array.isArray(dates) || dates.length === 0) throw httpError(400, 'Danh sách nhân viên và ngày không hợp lệ.')
+    db.transaction(() => {
+      if (!getShift(shiftId)) throw httpError(404, 'Không tìm thấy ca.')
+      if (dates.some((date: unknown) => !/^\d{4}-\d{2}-\d{2}$/.test(String(date)))) throw httpError(400, 'Ngày phân ca không hợp lệ.')
+      const targets = employeeIds.map((employeeId: string) => getEmployee(employeeId))
+      if (targets.some((target) => !target || ![1, 2, 3].includes(target.status)
+        || !canManageShiftSchedule(req.authorizationActor!, { id: target.id, departmentId: target.departmentId }))) {
+        throw httpError(404, 'Một hoặc nhiều nhân viên không tồn tại trong effective scope.')
+      }
+      for (const target of targets) {
+        for (const date of dates) {
+          db.prepare('DELETE FROM shift_schedules WHERE employee_id=? AND date=?').run(target!.id, date)
+          db.prepare('INSERT INTO shift_schedules (id, employee_id, shift_id, date, rule_id, is_active) VALUES (?,?,?,?,NULL,1)').run(uid('sch'), target!.id, shiftId, date)
+        }
+        recomputeAll(target!.id)
+      }
+      pushAudit(req.user!.id, req.user!.email, 2, 'ShiftSchedule', null, `Phân ca hàng loạt (${employeeIds.length} NV)`)
+    })()
+    res.json({ ok: true })
+  } catch (error) { next(error) }
 })

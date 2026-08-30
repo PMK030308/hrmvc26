@@ -41,7 +41,7 @@ export const attendanceApi = {
 
   punchOptions(): Promise<{ regulation: AttendanceRegulation }> { return api.get('/attendance/punch-options') },
 
-  proxyPunch(payload: { targetEmployeeId: string; source: PunchSource; latitude?: number; longitude?: number; wifiSsid?: string }): Promise<PunchResponse> {
+  proxyPunch(payload: { targetEmployeeId: string; source: PunchSource; reason: string; latitude?: number; longitude?: number; wifiSsid?: string }): Promise<PunchResponse> {
     return api.post('/attendance/proxy-punch', payload)
   },
 

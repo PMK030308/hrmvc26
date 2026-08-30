@@ -15,6 +15,7 @@ import { isoNow, ymd, nowVn } from '../lib/date.js'
 import { getRegulation } from '../repo.js'
 import { REQUEST_PERMISSIONS, canManageRequestAttachment, canViewRequest } from '../authz/requestAuthorization.js'
 import { assertAuthorizedAction, loadRequestActor, loadRequestAuthorizationContext, requireViewableRequest } from '../authz/requestAuthorizationContext.js'
+import { isEligibleShiftSwapPartner, listEligibleShiftSwapPartners } from '../authz/shiftSwapPartnerAuthorization.js'
 
 const VALID_TYPES = ['leaves', 'late-earlies', 'overtimes', 'business-trips', 'shift-swaps', 'attendance-updates']
 
@@ -33,9 +34,8 @@ requestsRouter.get('/mine', requireAuth, (req: AuthedRequest, res) => {
 })
 
 requestsRouter.get('/catalog', requireAuth, requirePermission(REQUEST_PERMISSIONS.CREATE_OWN), (req: AuthedRequest, res) => {
-  const emp = getEmployee(req.user!.employeeId)!
-  const swapPartners = (db.prepare('SELECT * FROM employees WHERE department_id=? AND id!=? AND status=2').all(emp.departmentId, emp.id) as any[])
-    .map((e) => ({ id: e.id, name: e.full_name, code: e.employee_code }))
+  const actor = loadRequestActor(req.user!.id)
+  const swapPartners = listEligibleShiftSwapPartners(actor)
   res.json({
     leaveTypes: (db.prepare('SELECT * FROM leave_types').all() as any[]).map((r) => ({
       id: r.id, name: r.name, category: r.category, fundType: r.fund_type, maxDays: r.max_days,
@@ -61,6 +61,22 @@ requestsRouter.get('/ot-usage', requireAuth, requirePermission(REQUEST_PERMISSIO
     monthCap: reg?.otMonthlyCapHours ?? 40,
     yearCap: reg?.otYearlyCapHours ?? 200,
   })
+})
+
+// Static helpers must be declared before /:type and /:type/:id.
+requestsRouter.get('/my-shift/:date', requireAuth, (req: AuthedRequest, res) => {
+  const sched = getSchedule(req.user!.employeeId, req.params.date)
+  const shift = sched ? getShift(sched.shiftId) : null
+  res.json({ shift, schedule: sched })
+})
+
+requestsRouter.get('/partner-shift/:partnerId/:date', requireAuth, (req: AuthedRequest, res, next) => {
+  try {
+    const actor = loadRequestActor(req.user!.id)
+    if (!isEligibleShiftSwapPartner(actor, req.params.partnerId)) throw httpError(404, 'Không tìm thấy ca của đối tác.')
+    const sched = getSchedule(req.params.partnerId, req.params.date)
+    res.json({ shift: sched ? getShift(sched.shiftId) : null })
+  } catch (error) { next(error) }
 })
 
 requestsRouter.get('/:type', requireAuth, (req: AuthedRequest, res, next) => {
@@ -160,17 +176,6 @@ requestsRouter.delete('/attachments/:attachmentId', requireAuth, (req: AuthedReq
     })()
     res.json({ ok: true })
   } catch (e) { next(e) }
-})
-
-requestsRouter.get('/my-shift/:date', requireAuth, (req: AuthedRequest, res) => {
-  const sched = getSchedule(req.user!.employeeId, req.params.date)
-  const shift = sched ? getShift(sched.shiftId) : null
-  res.json({ shift, schedule: sched })
-})
-
-requestsRouter.get('/partner-shift/:partnerId/:date', requireAuth, (req, res) => {
-  const sched = getSchedule(req.params.partnerId, req.params.date)
-  res.json({ shift: sched ? getShift(sched.shiftId) : null })
 })
 
 requestsRouter.post('/shift-swaps/:id/partner-response', requireAuth, (req: AuthedRequest, res, next) => {

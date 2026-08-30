@@ -1,15 +1,48 @@
 // Attendance routes (§14.2 / §14.3 / §14.4)
 import { Router } from 'express'
 import { db } from '../db.js'
-import { requireAuth, type AuthedRequest } from '../middleware/auth.js'
+import { requireAuth, requirePermission, type AuthedRequest } from '../middleware/auth.js'
 import { getEmployee, getSchedule, getShift, punchesOfDay, getRecord, mapPunch, mapShift, mapShiftSchedule, mapNotification } from '../repo.js'
 import { pushAudit } from '../helpers.js'
 import { processPunch, proxyPunch } from '../engines/attendance.js'
 import { ymd, nowVn, addDays, endOfMonth, eachDayOfInterval, parseISO, yearsOfService, isoNow } from '../lib/date.js'
+import { loadAuthorizationActor, matchesEffectiveEmployeeScope } from '../authz/authorizationActor.js'
+import { ATTENDANCE_PERMISSIONS, canProxyPunch } from '../authz/attendanceAuthorization.js'
+import { authenticateAttendanceDevice, createAttendanceDevice, revokeAttendanceDevice, rotateAttendanceDeviceCredential } from '../services/deviceAuthService.js'
+import { httpError } from '../types.js'
 
 export const attendanceRouter = Router()
 
-attendanceRouter.post('/punch', requireAuth, (req: AuthedRequest, res, next) => {
+attendanceRouter.get('/devices', requireAuth, requirePermission(ATTENDANCE_PERMISSIONS.DEVICE_MANAGE), (_req, res) => {
+  res.json(db.prepare(`SELECT id, name, is_active isActive, created_at createdAt, updated_at updatedAt,
+    revoked_at revokedAt, last_used_at lastUsedAt FROM attendance_devices ORDER BY name`).all())
+})
+
+attendanceRouter.post('/devices', requireAuth, requirePermission(ATTENDANCE_PERMISSIONS.DEVICE_MANAGE), (req: AuthedRequest, res, next) => {
+  try {
+    createAttendanceDevice(req.body ?? {})
+    pushAudit(req.user!.id, req.user!.email, 1, 'AttendanceDevice', req.body?.id ?? null, `Tạo thiết bị ${req.body?.id ?? ''}`)
+    res.status(201).json({ ok: true })
+  } catch (error) { next(error) }
+})
+
+attendanceRouter.post('/devices/:id/rotate', requireAuth, requirePermission(ATTENDANCE_PERMISSIONS.DEVICE_MANAGE), (req: AuthedRequest, res, next) => {
+  try {
+    rotateAttendanceDeviceCredential(req.params.id, req.body?.credential)
+    pushAudit(req.user!.id, req.user!.email, 2, 'AttendanceDevice', req.params.id, `Xoay credential thiết bị ${req.params.id}`)
+    res.json({ ok: true })
+  } catch (error) { next(error) }
+})
+
+attendanceRouter.post('/devices/:id/revoke', requireAuth, requirePermission(ATTENDANCE_PERMISSIONS.DEVICE_MANAGE), (req: AuthedRequest, res, next) => {
+  try {
+    revokeAttendanceDevice(req.params.id)
+    pushAudit(req.user!.id, req.user!.email, 2, 'AttendanceDevice', req.params.id, `Thu hồi thiết bị ${req.params.id}`)
+    res.json({ ok: true })
+  } catch (error) { next(error) }
+})
+
+attendanceRouter.post('/punch', requireAuth, requirePermission(ATTENDANCE_PERMISSIONS.PUNCH_SELF), (req: AuthedRequest, res, next) => {
   try {
     const emp = getEmployee(req.user!.employeeId)!
     const p = req.body ?? {}
@@ -30,17 +63,28 @@ attendanceRouter.post('/punch', requireAuth, (req: AuthedRequest, res, next) => 
 // Xác thực bằng header X-Device-Key (shared secret qua env DEVICE_KEY, mặc định "technova-device").
 attendanceRouter.post('/device-punch', (req, res, next) => {
   try {
-    const deviceKey = process.env.DEVICE_KEY ?? 'technova-device'
-    if (req.header('X-Device-Key') !== deviceKey) { res.status(401).json({ status: 401, message: 'Thiết bị không hợp lệ.' }); return }
+    const device = authenticateAttendanceDevice(req.header('X-Device-Id') ?? undefined, req.header('X-Device-Key') ?? undefined)
+    if (!device) { res.status(401).json({ status: 401, message: 'Thiết bị không hợp lệ.' }); return }
     const { employeeCode, punchedAt, latitude, longitude, wifiSsid } = req.body ?? {}
     if (!employeeCode) { res.status(400).json({ status: 400, message: 'Thiếu mã nhân viên.' }); return }
+    if (punchedAt) {
+      const timestamp = new Date(punchedAt).getTime()
+      if (!Number.isFinite(timestamp) || Math.abs(Date.now() - timestamp) > 5 * 60 * 1000) {
+        res.status(400).json({ status: 400, message: 'Thời gian chấm công của thiết bị không hợp lệ hoặc đã quá hạn.' })
+        return
+      }
+    }
     const emp = (db.prepare('SELECT * FROM employees WHERE employee_code=? AND status=2').get(employeeCode) as any)
     if (!emp) { res.status(404).json({ status: 404, message: `Không tìm thấy nhân viên ${employeeCode}.` }); return }
     // punchedAt do máy đẩy (ISO giờ VN); nếu không có thì để engine dùng nowVn()
-    const payload: any = { latitude, longitude, wifiSsid, ipAddress: clientIp(req) }
+    const payload: any = {
+      latitude, longitude, wifiSsid, ipAddress: clientIp(req),
+      deviceId: device.id, deviceInfo: `Device:${device.id}`,
+    }
     if (punchedAt) payload.fixedPunchedAt = punchedAt
     const result = processPunch(emp.id, 1, payload) // source=1 device (vật lý)
-    pushAudit('device', `Máy chấm công #${employeeCode}`, 1, 'AttendancePunch', null, `Chấm công vật lý — ${result.message}`)
+    pushAudit(`device:${device.id}`, device.name, 1, 'AttendanceDevicePunch', null,
+      `device=${device.id}; employee=${emp.id}; ${result.message}`, clientIp(req))
     res.json(result)
   } catch (e) { next(e) }
 })
@@ -52,7 +96,7 @@ function clientIp(req: any): string {
   return req.ip ?? ''
 }
 
-attendanceRouter.get('/today', requireAuth, (req: AuthedRequest, res) => {
+attendanceRouter.get('/today', requireAuth, requirePermission(ATTENDANCE_PERMISSIONS.VIEW_SELF), (req: AuthedRequest, res) => {
   const date = ymd(nowVn())
   const sched = getSchedule(req.user!.employeeId, date)
   const shift = sched ? getShift(sched.shiftId) : null
@@ -61,7 +105,7 @@ attendanceRouter.get('/today', requireAuth, (req: AuthedRequest, res) => {
   res.json({ record, punches, todayShift: sched, shift })
 })
 
-attendanceRouter.get('/detail/:date', requireAuth, (req: AuthedRequest, res) => {
+attendanceRouter.get('/detail/:date', requireAuth, requirePermission(ATTENDANCE_PERMISSIONS.VIEW_SELF), (req: AuthedRequest, res) => {
   const date = req.params.date
   const sched = getSchedule(req.user!.employeeId, date)
   const shift = sched ? getShift(sched.shiftId) : null
@@ -70,7 +114,7 @@ attendanceRouter.get('/detail/:date', requireAuth, (req: AuthedRequest, res) => 
   res.json({ record, punches, shift })
 })
 
-attendanceRouter.get('/timesheet', requireAuth, (req: AuthedRequest, res) => {
+attendanceRouter.get('/timesheet', requireAuth, requirePermission(ATTENDANCE_PERMISSIONS.VIEW_SELF), (req: AuthedRequest, res) => {
   const year = Number(req.query.year), month = Number(req.query.month)
   const from = new Date(year, month - 1, 1)
   const to = endOfMonth(from)
@@ -94,7 +138,7 @@ attendanceRouter.get('/timesheet', requireAuth, (req: AuthedRequest, res) => {
   })
 })
 
-attendanceRouter.get('/shift-schedule', requireAuth, (req: AuthedRequest, res) => {
+attendanceRouter.get('/shift-schedule', requireAuth, requirePermission('shifts.schedule.view_self'), (req: AuthedRequest, res) => {
   const year = Number(req.query.year), month = Number(req.query.month)
   const from = new Date(year, month - 1, 1)
   const to = endOfMonth(from)
@@ -106,7 +150,7 @@ attendanceRouter.get('/shift-schedule', requireAuth, (req: AuthedRequest, res) =
   }))
 })
 
-attendanceRouter.get('/leave-plan', requireAuth, (req: AuthedRequest, res) => {
+attendanceRouter.get('/leave-plan', requireAuth, requirePermission(ATTENDANCE_PERMISSIONS.LEAVE_PLAN_SELF), (req: AuthedRequest, res) => {
   const year = nowVn().getFullYear()
   const balances = (db.prepare('SELECT * FROM leave_balances WHERE employee_id=? AND year=?').all(req.user!.employeeId, year) as any[]).map((r) => ({
     id: r.id, employeeId: r.employee_id, year: r.year, leaveTypeCategory: r.leave_type_category,
@@ -126,7 +170,12 @@ attendanceRouter.get('/leave-plan', requireAuth, (req: AuthedRequest, res) => {
 })
 
 attendanceRouter.get('/leavers-today', requireAuth, (req: AuthedRequest, res) => {
-  const emp = getEmployee(req.user!.employeeId)!
+  const actor = req.authorizationActor!
+  const viewAll = actor.permissions.has(ATTENDANCE_PERMISSIONS.VIEW_ALL)
+  if (!viewAll && !actor.permissions.has(ATTENDANCE_PERMISSIONS.LEAVERS_SCOPED)) {
+    res.status(403).json({ status: 403, message: 'Bạn không có quyền xem danh sách nghỉ.' })
+    return
+  }
   const today = ymd(nowVn())
   const leavers = (db.prepare(`SELECT * FROM requests WHERE type='leaves' AND status=3`).all() as any[]).filter((r) => {
     return today >= r.start_date && today <= r.end_date
@@ -134,10 +183,13 @@ attendanceRouter.get('/leavers-today', requireAuth, (req: AuthedRequest, res) =>
   res.json(leavers.map((r) => {
     const e = getEmployee(r.employee_id)!
     return { employee: { id: e.id, fullName: e.fullName, employeeCode: e.employeeCode }, leaveType: r.leave_type_name }
-  }).filter((x) => getEmployee(x.employee.id)?.departmentId === emp.departmentId))
+  }).filter((x) => {
+    const employee = getEmployee(x.employee.id)!
+    return viewAll || matchesEffectiveEmployeeScope(actor, { id: employee.id, departmentId: employee.departmentId })
+  }))
 })
 
-attendanceRouter.get('/punch-options', requireAuth, (_req, res) => {
+attendanceRouter.get('/punch-options', requireAuth, requirePermission(ATTENDANCE_PERMISSIONS.PUNCH_SELF), (_req, res) => {
   const reg = db.prepare('SELECT * FROM regulation LIMIT 1').get() as any
   const gps = db.prepare('SELECT * FROM gps_catalog WHERE regulation_id=?').all(reg.id) as any[]
   const wifi = db.prepare('SELECT * FROM wifi_catalog WHERE regulation_id=?').all(reg.id) as any[]
@@ -160,20 +212,41 @@ attendanceRouter.get('/punch-options', requireAuth, (_req, res) => {
 attendanceRouter.post('/proxy-punch', requireAuth, (req: AuthedRequest, res, next) => {
   try {
     const p = req.body ?? {}
+    const reason = typeof p.reason === 'string' ? p.reason.trim() : ''
+    if (reason.length < 5) throw httpError(400, 'Lý do chấm công hộ phải có nội dung cụ thể.')
+    if (!p.targetEmployeeId) throw httpError(400, 'Thiếu nhân viên cần chấm công hộ.')
+    if (p.targetEmployeeId === req.user!.employeeId) throw httpError(400, 'Tự chấm công phải sử dụng luồng chấm công thông thường.')
     // QL chấm hộ cũng không được dùng source=Face — khuôn mặt phải do NV tự quét hoặc qua máy vật lý.
     if (p.source === 1) {
       res.status(400).json({ status: 400, message: 'Không thể chấm hộ bằng khuôn mặt. Khuôn mặt phải do nhân viên tự quét.' })
       return
     }
-    p.ipAddress = clientIp(req)
-    const result = proxyPunch(p.targetEmployeeId, p.source, p)
-    const target = getEmployee(p.targetEmployeeId)
-    pushAudit(req.user!.id, req.user!.email, 1, 'AttendancePunch', null, `Chấm công hộ ${target?.fullName ?? ''} — ${result.message}`)
+    const result = db.transaction(() => {
+      const actor = loadAuthorizationActor(req.user!.id)
+      const target = getEmployee(p.targetEmployeeId)
+      if (!target || ![1, 2, 3].includes(target.status)) throw httpError(404, 'Không tìm thấy nhân viên.')
+      if (!canProxyPunch(actor, { id: target.id, departmentId: target.departmentId })) {
+        if (!actor.permissions.has('attendance.proxy_punch')) throw httpError(403, 'Bạn không có quyền chấm công hộ.')
+        throw httpError(404, 'Không tìm thấy nhân viên.')
+      }
+      const ipAddress = clientIp(req)
+      const output = proxyPunch(target.id, 99, {
+        ...p, source: undefined, reason: undefined, ipAddress, deviceInfo: 'Proxy',
+        proxyActorUserId: actor.userId, proxyReason: reason, notes: `Proxy: ${reason}`,
+      })
+      const punch = db.prepare(`SELECT is_check_in, punched_at, created_at FROM punches
+        WHERE employee_id=? ORDER BY created_at DESC LIMIT 1`).get(target.id) as any
+      const direction = punch?.is_check_in ? 'IN' : 'OUT'
+      pushAudit(actor.userId, actor.email, 1, 'AttendanceProxyPunch', null,
+        `actor=${actor.userId}; target=${target.id}; actual=${punch?.punched_at ?? ''}; recorded=${punch?.created_at ?? isoNow()}; type=${direction}; reason=${reason}; requestedSource=${p.source ?? ''}; ip=${ipAddress}`,
+        ipAddress)
+      return output
+    })()
     res.json(result)
   } catch (e) { next(e) }
 })
 
-attendanceRouter.post('/confirm-timesheet', requireAuth, (req: AuthedRequest, res, next) => {
+attendanceRouter.post('/confirm-timesheet', requireAuth, requirePermission(ATTENDANCE_PERMISSIONS.CONFIRM_SELF), (req: AuthedRequest, res, next) => {
   try {
     const { summaryTimesheetDetailId, status, comment } = req.body ?? {}
     const row = db.prepare('SELECT * FROM summary_timesheet_details WHERE id=?').get(summaryTimesheetDetailId) as any
@@ -183,7 +256,7 @@ attendanceRouter.post('/confirm-timesheet', requireAuth, (req: AuthedRequest, re
   } catch (e) { next(e) }
 })
 
-attendanceRouter.get('/dashboard', requireAuth, (req: AuthedRequest, res) => {
+attendanceRouter.get('/dashboard', requireAuth, requirePermission(ATTENDANCE_PERMISSIONS.VIEW_SELF), (req: AuthedRequest, res) => {
   const emp = getEmployee(req.user!.employeeId)!
   const today = ymd(nowVn())
   const sched = getSchedule(emp.id, today)

@@ -327,13 +327,16 @@ export function createAttemptToken(userId: string): { token: string; expiresAt: 
   return { token, expiresAt }
 }
 
-/** Lấy + đánh dấu dùng token. Trả về row nếu hợp lệ (chưa dùng, còn hạn). */
-export function consumeAttemptToken(token: string): { userId: string } | null {
-  const row = db.prepare('SELECT * FROM face_attempt_tokens WHERE token = ?').get(token) as any
-  if (!row) return null
-  if (row.used) return null
-  const age = Date.now() - new Date(row.created_at).getTime()
-  if (age > ATTEMPT_TTL_MS) return null
-  db.prepare('UPDATE face_attempt_tokens SET used = 1 WHERE id = ?').run(row.id)
-  return { userId: row.user_id }
+/** Atomically consume a one-time token only for the DB-fresh authenticated user. */
+export function consumeAttemptToken(token: string, userId: string): { userId: string } | null {
+  return db.transaction(() => {
+    const row = db.prepare(`SELECT id, user_id, created_at FROM face_attempt_tokens
+      WHERE token=? AND user_id=? AND used=0`).get(token, userId) as any
+    if (!row) return null
+    const createdAt = new Date(row.created_at).getTime()
+    if (!Number.isFinite(createdAt) || Date.now() - createdAt > ATTEMPT_TTL_MS) return null
+    const consumed = db.prepare(`UPDATE face_attempt_tokens SET used=1
+      WHERE id=? AND user_id=? AND used=0`).run(row.id, userId)
+    return consumed.changes === 1 ? { userId: row.user_id } : null
+  })()
 }

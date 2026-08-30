@@ -235,7 +235,7 @@ function upsertRecord(r: any): void {
 /** Xử lý 1 lượt chấm công mới. */
 export function processPunch(
   employeeId: string, source: number,
-  payload: { latitude?: number; longitude?: number; accuracy?: number; wifiSsid?: string; notes?: string; snapshotBase64?: string | null; fixedPunchedAt?: string; ipAddress?: string | null },
+  payload: { latitude?: number; longitude?: number; accuracy?: number; wifiSsid?: string; notes?: string; snapshotBase64?: string | null; fixedPunchedAt?: string; ipAddress?: string | null; deviceId?: string | null; deviceInfo?: string; proxyActorUserId?: string | null; proxyReason?: string | null },
 ): any {
   // Bọc trong transaction: nếu recomputeRecord throw giữa chừng → rollback punch
   // (không bỏ lẻ punch). better-sqlite3 đồng bộ + Node đơn luồng → các punch cùng
@@ -246,7 +246,7 @@ export function processPunch(
 
 /** Thực thi 1 lượt chấm (bên trong transaction). */
 function processPunchInner(employeeId: string, source: number,
-  payload: { latitude?: number; longitude?: number; accuracy?: number; wifiSsid?: string; notes?: string; snapshotBase64?: string | null; fixedPunchedAt?: string; ipAddress?: string | null },
+  payload: { latitude?: number; longitude?: number; accuracy?: number; wifiSsid?: string; notes?: string; snapshotBase64?: string | null; fixedPunchedAt?: string; ipAddress?: string | null; deviceId?: string | null; deviceInfo?: string; proxyActorUserId?: string | null; proxyReason?: string | null },
 ): any {
   // Mặc định dùng giờ VN hiện tại; máy chấm công vật lý có thể đẩy mốc giờ riêng (fixedPunchedAt, naive VN).
   let now: Date = nowVn()
@@ -349,13 +349,15 @@ function toRad(deg: number): number { return (deg * Math.PI) / 180 }
  *  (ON CONFLICT DO NOTHING — chống 2 lượt cùng giây của cùng NV). */
 function insertPunch(employeeId: string, date: string, iso: string, source: number,
   payload: any, isCheckIn: boolean): boolean {
-  const deviceInfo = source === 1 ? 'Máy chấm công' : 'Web'
+  const deviceInfo = payload.deviceInfo ?? (source === 1 ? 'Máy chấm công' : 'Web')
   const info = db.prepare(`INSERT INTO punches (id, employee_id, date, punched_at, source, device_info, latitude, longitude,
-    accuracy, wifi_ssid, notes, snapshot_base64, attendance_record_id, is_check_in, is_active, created_at, ip_address)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(employee_id, date, punched_at) DO NOTHING`).run(
+    accuracy, wifi_ssid, notes, snapshot_base64, attendance_record_id, is_check_in, is_active, created_at, ip_address,
+    device_id, proxy_actor_user_id, proxy_reason)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(employee_id, date, punched_at) DO NOTHING`).run(
     uid('p'), employeeId, date, iso, source, deviceInfo, payload.latitude ?? null, payload.longitude ?? null,
     payload.accuracy ?? null, payload.wifiSsid ?? null, payload.notes ?? null, payload.snapshotBase64 ?? null,
-    null, isCheckIn ? 1 : 0, 1, iso, payload.ipAddress ?? null)
+    null, isCheckIn ? 1 : 0, 1, iso, payload.ipAddress ?? null, payload.deviceId ?? null,
+    payload.proxyActorUserId ?? null, payload.proxyReason ?? null)
   return info.changes > 0
 }
 

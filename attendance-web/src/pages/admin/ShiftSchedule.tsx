@@ -6,8 +6,11 @@ import { shiftsApi } from '@/api/shifts'
 import { orgApi } from '@/api/org'
 import { PageHeader, Card, Spinner, EmptyState, Button, Select, Modal } from '@/components/ui'
 import { PeriodPicker } from '@/components/admin/widgets'
+import { usePermissions } from '@/hooks/usePermissions'
 
 export default function AdminShiftSchedule() {
+  const { hasPermission } = usePermissions()
+  const canManage = hasPermission('shifts.schedule.manage_scoped') || hasPermission('shifts.schedule.manage_all')
   const qc = useQueryClient()
   const now = new Date()
   const [year, setYear] = useState(now.getFullYear())
@@ -44,7 +47,8 @@ export default function AdminShiftSchedule() {
 
   const toggleEmp = (id: string) => {
     const next = new Set(selected)
-    next.has(id) ? next.delete(id) : next.add(id)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
     setSelected(next)
   }
   const doBulk = () => {
@@ -61,7 +65,7 @@ export default function AdminShiftSchedule() {
         <div className="flex flex-wrap items-end justify-between gap-4">
           <PeriodPicker year={year} month={month} onYear={setYear} onMonth={setMonth} showHalf={false}
             departments={departments} departmentId={dept} onDepartment={(v) => { setDept(v); setSelected(new Set()) }} />
-          <div className="flex flex-wrap items-end gap-2 rounded-xl bg-slate-50 p-3">
+          {canManage && <div className="flex flex-wrap items-end gap-2 rounded-xl bg-slate-50 p-3">
             <span className="flex items-center gap-1.5 text-xs font-medium text-slate-500"><Wand2 className="h-4 w-4" /> Phân hàng loạt</span>
             <Select value={bulkShift} onChange={(e) => setBulkShift(e.target.value)} className="w-40">
               <option value="">-- Chọn ca --</option>
@@ -71,7 +75,7 @@ export default function AdminShiftSchedule() {
             <span className="text-slate-400">→</span>
             <input type="number" min={1} max={31} value={toDay} onChange={(e) => setToDay(Number(e.target.value))} className="w-16 rounded-lg border border-slate-300 px-2 py-2 text-sm" title="Đến ngày" />
             <Button size="sm" loading={bulk.isPending} onClick={doBulk} disabled={selected.size === 0}>Áp dụng ({selected.size})</Button>
-          </div>
+          </div>}
         </div>
       </Card>
 
@@ -104,9 +108,9 @@ export default function AdminShiftSchedule() {
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50/50">
                   <th className="sticky left-0 z-10 bg-slate-50 px-4 py-2 text-left text-xs font-semibold uppercase text-slate-500">
-                    <input type="checkbox" className="mr-2 align-middle"
+                    {canManage && <input type="checkbox" className="mr-2 align-middle"
                       checked={selected.size === employees.length && employees.length > 0}
-                      onChange={(e) => setSelected(e.target.checked ? new Set(employees.map((x) => x.id)) : new Set())} />
+                      onChange={(e) => setSelected(e.target.checked ? new Set(employees.map((x) => x.id)) : new Set())} />}
                     Nhân viên
                   </th>
                   {days.map((d) => {
@@ -120,7 +124,7 @@ export default function AdminShiftSchedule() {
                   <tr key={e.id} className="hover:bg-slate-50">
                     <td className="sticky left-0 z-10 bg-white px-4 py-2">
                       <div className="flex items-center gap-2">
-                        <input type="checkbox" checked={selected.has(e.id)} onChange={() => toggleEmp(e.id)} className="align-middle" />
+                        {canManage && <input type="checkbox" checked={selected.has(e.id)} onChange={() => toggleEmp(e.id)} className="align-middle" />}
                         <div><p className="whitespace-nowrap font-medium text-slate-800">{e.fullName}</p><p className="text-xs text-slate-400">{e.employeeCode}</p></div>
                       </div>
                     </td>
@@ -129,10 +133,10 @@ export default function AdminShiftSchedule() {
                       const sh = sc ? shiftMap.get(sc.shiftId) : null
                       return (
                         <td key={d} className="px-1 py-2 text-center">
-                          <button onClick={() => { setCell({ empId: e.id, date: d }); setPickShift(sc?.shiftId ?? '') }}
+                          <button disabled={!canManage} onClick={() => { if (canManage) { setCell({ empId: e.id, date: d }); setPickShift(sc?.shiftId ?? '') } }}
                             className="grid h-7 w-7 place-items-center rounded-md text-[10px] font-bold text-white transition hover:scale-110"
                             style={{ background: sh?.color ?? 'transparent', color: sh ? '#fff' : '#cbd5e1' }}
-                            title={sh ? `${sh.name}` : 'Bấm để phân ca'}>
+                            title={sh ? `${sh.name}` : canManage ? 'Bấm để phân ca' : 'Chỉ có quyền xem'}>
                             {sh ? sh.name.charAt(0) : '·'}
                           </button>
                         </td>
@@ -146,7 +150,7 @@ export default function AdminShiftSchedule() {
         )}
       </Card>
 
-      <Modal open={!!cell} onClose={() => setCell(null)} size="sm"
+      <Modal open={canManage && !!cell} onClose={() => setCell(null)} size="sm"
         title={`Phân ca · ${cell?.date ?? ''}`}
         footer={<>
           <Button variant="secondary" onClick={() => { setCell(null); setPickShift('') }}>Hủy</Button>

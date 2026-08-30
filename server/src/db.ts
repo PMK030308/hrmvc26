@@ -145,8 +145,25 @@ export function initSchema(): void {
     is_check_in INTEGER NOT NULL DEFAULT 1,
     is_active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
+    ip_address TEXT,
+    device_id TEXT,
+    proxy_actor_user_id TEXT,
+    proxy_reason TEXT,
     FOREIGN KEY (employee_id) REFERENCES employees(id)
   );
+
+  CREATE TABLE IF NOT EXISTS attendance_devices (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    credential_salt TEXT NOT NULL,
+    credential_hash TEXT NOT NULL,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    revoked_at TEXT,
+    last_used_at TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_attendance_devices_active ON attendance_devices(is_active);
 
   CREATE TABLE IF NOT EXISTS attendance_records (
     id TEXT PRIMARY KEY,

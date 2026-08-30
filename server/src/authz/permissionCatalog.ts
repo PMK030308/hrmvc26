@@ -1,5 +1,6 @@
 import type { RoleCode } from '../types.js'
 import { REQUEST_PERMISSIONS } from './requestAuthorization.js'
+import { ATTENDANCE_PERMISSIONS } from './attendanceAuthorization.js'
 
 export interface PermissionDefinition {
   key: string
@@ -29,10 +30,24 @@ export const PERMISSION_CATALOG: readonly PermissionDefinition[] = [
   { key: REQUEST_PERMISSIONS.SHIFT_SWAP_RESPOND, module: 'requests', label: 'Phản hồi khi là đối tác đổi ca', enforced: true, defaultRoles: employee },
   { key: 'config.permission.manage', module: 'config', label: 'Quản lý ma trận phân quyền', enforced: true, defaultRoles: ['Admin'] },
   { key: 'config.user.manage', module: 'config', label: 'Quản lý quyền và trạng thái tài khoản', enforced: true, defaultRoles: ['Admin'] },
-  { key: 'attendance.punch.own', module: 'attendance', label: 'Chấm công cho chính mình', enforced: false, defaultRoles: employee },
-  { key: 'attendance.punch.proxy', module: 'attendance', label: 'Chấm công hộ', enforced: false, defaultRoles: ['HR', 'Admin'] },
-  { key: 'shifts.schedule.view', module: 'shifts', label: 'Xem lịch làm việc', enforced: false, defaultRoles: employee },
-  { key: 'shifts.schedule.manage', module: 'shifts', label: 'Quản lý lịch làm việc', enforced: false, defaultRoles: ['HR', 'Admin'] },
+  { key: ATTENDANCE_PERMISSIONS.PUNCH_SELF, module: 'attendance', label: 'Chấm công cho chính mình', enforced: true, defaultRoles: employee },
+  { key: ATTENDANCE_PERMISSIONS.VIEW_SELF, module: 'attendance', label: 'Xem công của chính mình', enforced: true, defaultRoles: employee },
+  { key: ATTENDANCE_PERMISSIONS.VIEW_SCOPED, module: 'attendance', label: 'Xem công theo effective scope', enforced: true, defaultRoles: ['Manager', 'HR'] },
+  { key: ATTENDANCE_PERMISSIONS.VIEW_ALL, module: 'attendance', label: 'Xem công toàn công ty', enforced: true, defaultRoles: ['Admin'] },
+  { key: ATTENDANCE_PERMISSIONS.PROXY_PUNCH, module: 'attendance', label: 'Chấm công hộ trong effective scope', enforced: true, defaultRoles: ['HR', 'Admin'] },
+  { key: ATTENDANCE_PERMISSIONS.CONFIRM_SELF, module: 'attendance', label: 'Xác nhận bảng công của mình', enforced: true, defaultRoles: employee },
+  { key: ATTENDANCE_PERMISSIONS.LEAVE_PLAN_SELF, module: 'attendance', label: 'Xem kế hoạch nghỉ của mình', enforced: true, defaultRoles: employee },
+  { key: ATTENDANCE_PERMISSIONS.LEAVERS_SCOPED, module: 'attendance', label: 'Xem người nghỉ theo effective scope', enforced: true, defaultRoles: ['Manager', 'HR', 'Admin'] },
+  { key: ATTENDANCE_PERMISSIONS.EVIDENCE_VIEW, module: 'attendance', label: 'Xem bằng chứng chấm công nhạy cảm', enforced: true, defaultRoles: ['HR', 'Admin'] },
+  { key: ATTENDANCE_PERMISSIONS.DEVICE_MANAGE, module: 'attendance', label: 'Quản lý thiết bị chấm công', enforced: true, defaultRoles: ['Admin'] },
+  { key: 'face.manage.self', module: 'face', label: 'Quản lý khuôn mặt của chính mình', enforced: true, defaultRoles: employee },
+  { key: 'shifts.catalog.view', module: 'shifts', label: 'Xem danh mục ca', enforced: true, defaultRoles: employee },
+  { key: 'shifts.catalog.manage', module: 'shifts', label: 'Quản lý danh mục ca', enforced: true, defaultRoles: ['HR', 'Admin'] },
+  { key: 'shifts.schedule.view_self', module: 'shifts', label: 'Xem lịch làm việc của mình', enforced: true, defaultRoles: employee },
+  { key: 'shifts.schedule.view_scoped', module: 'shifts', label: 'Xem lịch làm việc theo effective scope', enforced: true, defaultRoles: ['Manager', 'HR'] },
+  { key: 'shifts.schedule.view_all', module: 'shifts', label: 'Xem lịch làm việc toàn công ty', enforced: true, defaultRoles: ['Admin'] },
+  { key: 'shifts.schedule.manage_scoped', module: 'shifts', label: 'Phân ca theo effective scope', enforced: true, defaultRoles: ['HR'] },
+  { key: 'shifts.schedule.manage_all', module: 'shifts', label: 'Phân ca toàn công ty', enforced: true, defaultRoles: ['Admin'] },
   { key: 'org.employee.view', module: 'org', label: 'Xem nhân viên', enforced: false, defaultRoles: ['Manager', 'HR', 'Admin'] },
   { key: 'org.employee.manage', module: 'org', label: 'Quản lý nhân viên', enforced: false, defaultRoles: ['HR', 'Admin'] },
   { key: 'delegation.manage_own', module: 'delegation', label: 'Quản lý ủy quyền của mình', enforced: false, defaultRoles: approver },

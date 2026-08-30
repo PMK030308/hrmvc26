@@ -7,7 +7,7 @@
 // Chấm mặt là TỰ CHẤM: employeeId lấy từ JWT của người dùng hiện tại.
 // ============================================================================
 import { Router } from 'express'
-import { requireAuth, type AuthedRequest } from '../middleware/auth.js'
+import { requireAuth, requirePermission, type AuthedRequest } from '../middleware/auth.js'
 import { httpError } from '../types.js'
 import {
   getFaceData, upsertFaceData, createAttemptToken, consumeAttemptToken, getRegulation,
@@ -16,11 +16,14 @@ import { pushAudit } from '../helpers.js'
 import { processPunch } from '../engines/attendance.js'
 
 export const faceRouter = Router()
+const FACE_SELF_PERMISSION = 'face.manage.self'
 
 // Ngưỡng khớp nới lỏng (0.6 → 0.7): cùng người đăng ký & chấm thường < 0.5, nhưng
 // góc/ánh sáng khác làm khoảng cách tăng → 0.7 cho phép rộng hơn, "chỉ cần có khuôn mặt thật".
 const MATCH_THRESHOLD = 0.7
 const DESCRIPTOR_DIM = 128
+const MAX_FACE_SAMPLES = 8
+const MAX_FACE_IMAGE_CHARS = 3 * 1024 * 1024
 
 /** Khoảng cách Euclidean giữa 2 descriptor (number[] | Float32Array). */
 function euclideanDistance(a: ArrayLike<number>, b: ArrayLike<number>): number {
@@ -51,7 +54,7 @@ function livenessOk(strictness: number, l: any): boolean {
 }
 
 /* ------------------------------- /status ---------------------------------- */
-faceRouter.get('/status', requireAuth, (req: AuthedRequest, res) => {
+faceRouter.get('/status', requireAuth, requirePermission(FACE_SELF_PERMISSION), (req: AuthedRequest, res) => {
   const fd = getFaceData(req.user!.employeeId)
   res.json({
     registered: !!fd,
@@ -61,11 +64,14 @@ faceRouter.get('/status', requireAuth, (req: AuthedRequest, res) => {
 })
 
 /* ------------------------------ /register --------------------------------- */
-faceRouter.post('/register', requireAuth, (req: AuthedRequest, res, next) => {
+faceRouter.post('/register', requireAuth, requirePermission(FACE_SELF_PERMISSION), (req: AuthedRequest, res, next) => {
   try {
     const { descriptors, capturedCount, photoBase64 } = req.body ?? {}
     if (!Array.isArray(descriptors) || descriptors.length === 0)
       throw httpError(400, 'Thiếu descriptor khuôn mặt.')
+    if (descriptors.length > MAX_FACE_SAMPLES) throw httpError(400, `Chỉ được đăng ký tối đa ${MAX_FACE_SAMPLES} mẫu khuôn mặt.`)
+    if (photoBase64 != null && (typeof photoBase64 !== 'string' || photoBase64.length > MAX_FACE_IMAGE_CHARS))
+      throw httpError(400, 'Ảnh khuôn mặt vượt quá giới hạn cho phép.')
     for (const d of descriptors) {
       if (!isValidDescriptor(d)) throw httpError(400, `Descriptor không hợp lệ (cần mảng ${DESCRIPTOR_DIM} số).`)
     }
@@ -77,7 +83,7 @@ faceRouter.post('/register', requireAuth, (req: AuthedRequest, res, next) => {
 })
 
 /* ------------------------------- /attempt --------------------------------- */
-faceRouter.get('/attempt', requireAuth, (req: AuthedRequest, res) => {
+faceRouter.get('/attempt', requireAuth, requirePermission(FACE_SELF_PERMISSION), (req: AuthedRequest, res) => {
   const reg = getRegulation()
   const { token, expiresAt } = createAttemptToken(req.user!.id)
   res.json({
@@ -89,11 +95,11 @@ faceRouter.get('/attempt', requireAuth, (req: AuthedRequest, res) => {
 })
 
 /* ------------------------------- /verify ---------------------------------- */
-faceRouter.post('/verify', requireAuth, (req: AuthedRequest, res, next) => {
+faceRouter.post('/verify', requireAuth, requirePermission(FACE_SELF_PERMISSION), (req: AuthedRequest, res, next) => {
   try {
     const { descriptor, liveness, token, gps } = req.body ?? {}
     if (!token) throw httpError(400, 'Thiếu token phiên.')
-    const consumed = consumeAttemptToken(token)
+    const consumed = consumeAttemptToken(token, req.user!.id)
     if (!consumed) throw httpError(401, 'Token phiên không hợp lệ hoặc đã hết hạn.')
 
     const empId = req.user!.employeeId
@@ -102,6 +108,9 @@ faceRouter.post('/verify', requireAuth, (req: AuthedRequest, res, next) => {
       throw httpError(400, 'Bạn chưa đăng ký khuôn mặt. Vui lòng đăng ký trước khi chấm công.')
 
     if (!isValidDescriptor(descriptor)) throw httpError(400, 'Descriptor không hợp lệ.')
+    if (liveness?.snapshotBase64 != null
+      && (typeof liveness.snapshotBase64 !== 'string' || liveness.snapshotBase64.length > MAX_FACE_IMAGE_CHARS))
+      throw httpError(400, 'Ảnh xác minh khuôn mặt vượt quá giới hạn cho phép.')
 
     // So khớp: lấy khoảng cách nhỏ nhất tới các mẫu đã đăng ký.
     let minDist = Infinity

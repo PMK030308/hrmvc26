@@ -78,3 +78,21 @@ export function matchesDepartmentScope(actor: AuthorizationActor, departmentId: 
     ) SELECT 1 FROM ancestors WHERE id IN (${placeholders}) LIMIT 1`)
     .get(departmentId, ...actor.departmentScopes)
 }
+
+export function matchesReportingLine(actor: AuthorizationActor, targetEmployeeId: string): boolean {
+  if (!targetEmployeeId || targetEmployeeId === actor.employeeId) return false
+  return !!db.prepare(`WITH RECURSIVE manager_chain(id, manager_id) AS (
+      SELECT id, manager_id FROM employees WHERE id=?
+      UNION ALL
+      SELECT manager.id, manager.manager_id
+      FROM employees manager JOIN manager_chain child ON manager.id=child.manager_id
+    ) SELECT 1 FROM manager_chain WHERE id=? LIMIT 1`)
+    .get(targetEmployeeId, actor.employeeId)
+}
+
+export function matchesEffectiveEmployeeScope(
+  actor: AuthorizationActor,
+  target: { id: string; departmentId: string | null | undefined },
+): boolean {
+  return matchesDepartmentScope(actor, target.departmentId) || matchesReportingLine(actor, target.id)
+}

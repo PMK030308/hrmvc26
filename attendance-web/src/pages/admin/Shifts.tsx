@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { shiftsApi } from '@/api/shifts'
 import { PageHeader, Card, CardHeader, Spinner, EmptyState, Button, Modal, Input, Select, ConfirmDialog, Badge } from '@/components/ui'
 import type { Shift } from '@/types'
+import { usePermissions } from '@/hooks/usePermissions'
 
 const blank: Partial<Shift> = {
   code: '', name: '', startTime: '08:00', endTime: '17:00', breakStartTime: '', breakEndTime: '',
@@ -15,6 +16,8 @@ const blank: Partial<Shift> = {
 const toSec = (t: string) => t ? (t.length === 5 ? `${t}:00` : t) : null
 
 export default function AdminShifts() {
+  const { hasPermission } = usePermissions()
+  const canManage = hasPermission('shifts.catalog.manage')
   const qc = useQueryClient()
   const [editing, setEditing] = useState<Partial<Shift> | null>(null)
   const [del, setDel] = useState<Shift | null>(null)
@@ -42,9 +45,9 @@ export default function AdminShifts() {
 
   return (
     <div>
-      <PageHeader title="Ca làm việc" subtitle="Định nghĩa ca & cửa sổ chấm công" actions={
+      <PageHeader title="Ca làm việc" subtitle="Định nghĩa ca & cửa sổ chấm công" actions={canManage ?
         <Button icon={<Plus className="h-4 w-4" />} onClick={() => setEditing({ ...blank })}>Thêm ca</Button>
-      } />
+      : undefined} />
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {isLoading ? <Card className="p-5 sm:col-span-2 lg:col-span-3"><Spinner /></Card>
@@ -52,11 +55,11 @@ export default function AdminShifts() {
           : shifts!.map((s) => (
             <Card key={s.id} className="overflow-hidden">
               <div className="h-1.5" style={{ background: s.color }} />
-              <CardHeader title={s.name} subtitle={s.code} icon={<Clock className="h-4 w-4" />} action={
+              <CardHeader title={s.name} subtitle={s.code} icon={<Clock className="h-4 w-4" />} action={canManage ?
                 <div className="flex gap-1">
                   <button onClick={() => setEditing(s)} className="grid h-8 w-8 place-items-center rounded-lg text-slate-500 hover:bg-slate-100"><Pencil className="h-4 w-4" /></button>
                   <button onClick={() => setDel(s)} className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-danger-50 hover:text-danger-600"><Trash2 className="h-4 w-4" /></button>
-                </div>
+                </div> : undefined
               } />
               <div className="space-y-2 p-5 text-sm">
                 <div className="flex items-center justify-between"><span className="text-slate-500">Giờ làm</span><span className="font-mono font-semibold text-slate-800">{s.startTime.slice(0, 5)} – {s.endTime.slice(0, 5)}</span></div>
@@ -72,13 +75,13 @@ export default function AdminShifts() {
           ))}
       </div>
 
-      <Modal open={!!editing} onClose={() => setEditing(null)} size="lg"
+      <Modal open={canManage && !!editing} onClose={() => setEditing(null)} size="lg"
         title={editing?.id ? 'Sửa ca' : 'Thêm ca'}
         footer={<><Button variant="secondary" onClick={() => setEditing(null)}>Hủy</Button><Button loading={save.isPending} onClick={() => save.mutate(editing!)}>Lưu</Button></>}>
         {editing && <ShiftForm value={editing} onChange={setEditing} />}
       </Modal>
 
-      <ConfirmDialog open={!!del} onClose={() => setDel(null)} danger title="Xóa ca"
+      <ConfirmDialog open={canManage && !!del} onClose={() => setDel(null)} danger title="Xóa ca"
         message={`Xóa ca "${del?.name}"? Phân ca liên quan cũng sẽ bị xóa.`} confirmText="Xóa"
         onConfirm={() => del && remove.mutate(del.id)} />
     </div>
