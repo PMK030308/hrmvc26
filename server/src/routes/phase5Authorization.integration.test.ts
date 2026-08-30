@@ -16,6 +16,7 @@ const { default: express } = await import('express')
 const { default: jwt } = await import('jsonwebtoken')
 const { timesheetRouter, payrollRouter } = await import('./timesheet.js')
 const { dashboardRouter } = await import('./dashboard.js')
+const { attendanceRouter } = await import('./attendance.js')
 
 let server: ReturnType<ReturnType<typeof express>['listen']>
 let baseUrl = ''
@@ -43,6 +44,7 @@ before(async () => {
   app.use('/api/timesheet', timesheetRouter)
   app.use('/api/payroll', payrollRouter)
   app.use('/api/dashboard', dashboardRouter)
+  app.use('/api/attendance', attendanceRouter)
   app.use((error: HttpError, _req: Request, res: Response, _next: NextFunction) => {
     res.status(error.status ?? 500).json({ message: error.message })
   })
@@ -254,4 +256,21 @@ test('malformed periods and dates are rejected before report queries', async () 
   setPermission('Admin', 'reports.attendance.view_all', true)
   assert.equal((await fetch(`${baseUrl}/payroll/sheet/not-a-period`, { headers: auth('admin') })).status, 400)
   assert.equal((await fetch(`${baseUrl}/dashboard/director-reports?from=nope&to=2026-08-01`, { headers: auth('admin') })).status, 400)
+})
+
+test('employee timesheet confirmation is self-only and double-submit safe', async () => {
+  insertSummary(2, 1)
+  setPermission('Employee', 'attendance.confirm_self', true)
+  const foreign = await fetch(`${baseUrl}/attendance/confirm-timesheet`, {
+    method: 'POST', headers: { ...auth('outsider'), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ summaryTimesheetDetailId: 'detail-employee-employee', status: 2, comment: 'foreign' }),
+  })
+  assert.equal(foreign.status, 404)
+
+  const submit = () => fetch(`${baseUrl}/attendance/confirm-timesheet`, {
+    method: 'POST', headers: { ...auth('employee'), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ summaryTimesheetDetailId: 'detail-employee-employee', status: 2, comment: 'confirmed' }),
+  })
+  const [first, second] = await Promise.all([submit(), submit()])
+  assert.deepEqual([first.status, second.status].sort(), [200, 409])
 })
