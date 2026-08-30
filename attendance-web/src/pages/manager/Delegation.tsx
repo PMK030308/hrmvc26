@@ -12,18 +12,18 @@ import { useAuthStore } from '@/stores/authStore'
 import { fmtDate } from '@/lib/date'
 import { PageHeader, Card, CardHeader, CardBody, Spinner, EmptyState, Button, Select, Input, Textarea, Badge, ConfirmDialog } from '@/components/ui'
 import type { DelegationRich } from '@/types'
-
-const APPROVER_ROLES = ['Manager', 'HR', 'Director', 'Accountant', 'Admin']
+import { organizationCapabilities } from '@/lib/organizationCapabilities'
 
 export default function DelegationPage() {
   const user = useAuthStore((s) => s.user)!
-  const canDelegate = user.roles.some((r) => APPROVER_ROLES.includes(r))
-  const isHrAdmin = user.roles.includes('HR') || user.roles.includes('Admin')
+  const capabilities = organizationCapabilities(user.effectivePermissions ?? [])
+  const canDelegate = capabilities.canCreateDelegation
+  const canViewAll = capabilities.canViewAllDelegations
   const qc = useQueryClient()
 
   const { data, isLoading } = useQuery({ queryKey: ['delegation', 'mine'], queryFn: () => delegationApi.mine() })
   const { data: approvers } = useQuery({ queryKey: ['delegation', 'approvers'], queryFn: () => delegationApi.approvers(), enabled: canDelegate })
-  const { data: all } = useQuery({ queryKey: ['delegation', 'all'], queryFn: () => delegationApi.all(), enabled: isHrAdmin })
+  const { data: all } = useQuery({ queryKey: ['delegation', 'all'], queryFn: () => delegationApi.all(), enabled: canViewAll })
 
   const [delegateUserId, setDelegateUserId] = useState('')
   const [fromDate, setFromDate] = useState('')
@@ -43,7 +43,7 @@ export default function DelegationPage() {
   })
 
   if (!canDelegate) {
-    return <Card><EmptyState icon={<ShieldCheck className="h-6 w-6" />} title="Không có quyền" description="Chỉ quản lý / HR / Giám đốc / Kế toán mới được ủy quyền duyệt đơn." /></Card>
+    return <Card><EmptyState icon={<ShieldCheck className="h-6 w-6" />} title="Không có quyền" description="Tài khoản chưa được cấp quyền ủy quyền duyệt đơn." /></Card>
   }
 
   const today = fmtDate(new Date().toISOString(), 'yyyy-MM-dd')
@@ -77,7 +77,8 @@ export default function DelegationPage() {
         <div className="space-y-5 lg:col-span-2">
           <Card>
             <CardHeader title="Ủy quyền do tôi tạo" subtitle="Tôi ủy quyền cho người khác khi vắng" icon={<UserCheck className="h-4 w-4" />} />
-            <DlgList items={data?.asDelegator ?? []} loading={isLoading} active={active} onDelete={setConfirmDel} mode="delegator" />
+            <DlgList items={data?.asDelegator ?? []} loading={isLoading} active={active}
+              onDelete={capabilities.canRevokeOwnDelegation ? setConfirmDel : undefined} mode="delegator" />
           </Card>
 
           <Card>
@@ -85,10 +86,11 @@ export default function DelegationPage() {
             <DlgList items={data?.asDelegate ?? []} loading={isLoading} active={active} mode="delegate" />
           </Card>
 
-          {isHrAdmin && (
+          {canViewAll && (
             <Card>
               <CardHeader title="Tất cả ủy quyền (giám sát HR)" icon={<ShieldCheck className="h-4 w-4" />} action={<Badge tone="muted">{all?.length ?? 0}</Badge>} />
-              <DlgList items={all ?? []} loading={false} active={(d) => !!d.isActiveNow} mode="all" onDelete={(d) => setConfirmDel(d)} />
+              <DlgList items={all ?? []} loading={false} active={(d) => !!d.isActiveNow} mode="all"
+                onDelete={capabilities.canRevokeAnyDelegation ? setConfirmDel : undefined} />
             </Card>
           )}
         </div>

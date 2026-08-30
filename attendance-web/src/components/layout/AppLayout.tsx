@@ -114,7 +114,8 @@ export function AppLayout() {
     : baseNav
   const nav = withAuthorization.filter((item) =>
     (!item.roles || item.roles.some((role) => user.roles.includes(role)))
-    && (!item.permission || user.effectivePermissions?.includes(item.permission)),
+    && (!item.permission || user.effectivePermissions?.includes(item.permission))
+    && (!item.permissionAny || item.permissionAny.some((permission) => user.effectivePermissions?.includes(permission))),
   )
   useRealtime()
 

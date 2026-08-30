@@ -131,6 +131,13 @@ export interface Employee {
   wage: number
 }
 
+export type EmployeeProjection = Pick<Employee,
+  'id' | 'employeeCode' | 'fullName' | 'email' | 'status' | 'avatarData' | 'managerId' | 'departmentId' | 'positionId' | 'branchId'
+> & Partial<Pick<Employee,
+  'firstName' | 'lastName' | 'gender' | 'dateOfBirth' | 'phone' | 'address' | 'maritalStatus' |
+  'hireDate' | 'workNature' | 'contractType' | 'wage'
+>>
+
 /* --------------------------------- Ca ------------------------------------- */
 export type ShiftStatus = 0 | 1 // Inactive | Active
 

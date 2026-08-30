@@ -20,7 +20,7 @@ export default function AdminAudit() {
 
   return (
     <div>
-      <PageHeader title="Audit log" subtitle="Nhật ký thao tác hệ thống (chỉ Admin)" />
+      <PageHeader title="Audit log" subtitle="Nhật ký thao tác hệ thống theo quyền được cấp" />
       <Card>
         <CardHeader title={`${total} bản ghi · trang ${page}/${pages}`} icon={<ScrollText className="h-4 w-4" />} action={
           <div className="flex items-center gap-2">

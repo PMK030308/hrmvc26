@@ -6,7 +6,7 @@ import {
   Settings, ShieldCheck, ScrollText, Radio, ListChecks, BadgeDollarSign, UserCheck,
 } from 'lucide-react'
 
-export interface NavItem { label: string; to: string; icon: any; roles?: RoleCode[]; permission?: string; badgeKey?: string }
+export interface NavItem { label: string; to: string; icon: any; roles?: RoleCode[]; permission?: string; permissionAny?: string[]; badgeKey?: string }
 
 export const authorizationNavItem: NavItem = {
   label: 'Role/Quyền', to: '/admin/roles', icon: ShieldCheck, permission: 'config.permission.manage',
@@ -22,38 +22,38 @@ export const employeeNav: NavItem[] = [
   { label: 'Duyệt đơn', to: '/employee/approvals', icon: ClipboardCheck, badgeKey: 'approvals' },
   { label: 'Lương', to: '/employee/salary', icon: Wallet },
   { label: 'Thông báo', to: '/employee/notifications', icon: Bell, badgeKey: 'notifications' },
-  { label: 'Ủy quyền duyệt', to: '/employee/delegation', icon: UserCheck, roles: ['Manager', 'HR', 'Director', 'Accountant', 'Admin'] },
+  { label: 'Ủy quyền duyệt', to: '/employee/delegation', icon: UserCheck, permission: 'delegation.create' },
   { label: 'Hồ sơ', to: '/employee/profile', icon: UserCog },
 ]
 
 export const adminNav: NavItem[] = [
   { label: 'Dashboard', to: '/admin/dashboard', icon: LayoutDashboard },
   { label: 'Live', to: '/admin/live', icon: Radio },
-  { label: 'Nhân viên', to: '/admin/employees', icon: Users },
+  { label: 'Nhân viên', to: '/admin/employees', icon: Users, permissionAny: ['org.employee.view_scoped', 'org.employee.view_all'] },
   { label: 'Phòng ban', to: '/admin/departments', icon: Building2 },
   { label: 'Ca làm việc', to: '/admin/shifts', icon: Clock },
   { label: 'Phân ca', to: '/admin/shift-schedule', icon: CalendarRange },
   { label: 'Bảng công', to: '/admin/timesheet', icon: Table2 },
   { label: 'Bảng tổng hợp', to: '/admin/summary-timesheet', icon: ListChecks },
   { label: 'Quản lý đơn', to: '/admin/requests', icon: FileText },
-  { label: 'Ủy quyền duyệt', to: '/employee/delegation', icon: UserCheck },
+  { label: 'Ủy quyền duyệt', to: '/employee/delegation', icon: UserCheck, permission: 'delegation.create' },
   { label: 'Lương', to: '/admin/payroll', icon: BadgeDollarSign },
   { label: 'Báo cáo', to: '/admin/reports', icon: BarChart3 },
-  { label: 'Quy định', to: '/admin/regulations/attendance', icon: Settings },
+  { label: 'Quy định', to: '/admin/regulations/attendance', icon: Settings, permission: 'config.regulation.view' },
   authorizationNavItem,
-  { label: 'Audit log', to: '/admin/audit', icon: ScrollText, roles: ['Admin'] },
+  { label: 'Audit log', to: '/admin/audit', icon: ScrollText, permission: 'audit.view' },
 ]
 
 export const accountantNav: NavItem[] = [
   { label: 'Bảng lương', to: '/accountant/payroll', icon: BadgeDollarSign },
-  { label: 'Ủy quyền duyệt', to: '/employee/delegation', icon: UserCheck },
+  { label: 'Ủy quyền duyệt', to: '/employee/delegation', icon: UserCheck, permission: 'delegation.create' },
   { label: 'Báo cáo', to: '/accountant/reports', icon: BarChart3 },
 ]
 
 export const directorNav: NavItem[] = [
   { label: 'Dashboard', to: '/director', icon: LayoutDashboard },
   { label: 'Duyệt đơn', to: '/director/approvals', icon: ClipboardCheck },
-  { label: 'Ủy quyền duyệt', to: '/employee/delegation', icon: UserCheck },
+  { label: 'Ủy quyền duyệt', to: '/employee/delegation', icon: UserCheck, permission: 'delegation.create' },
   { label: 'Kỳ lương', to: '/director/payroll', icon: BadgeDollarSign },
   { label: 'Báo cáo', to: '/director/reports', icon: BarChart3 },
 ]

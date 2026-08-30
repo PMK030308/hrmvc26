@@ -7,20 +7,31 @@ import { regulationsApi } from '@/api/config'
 import { LIVENESS_LABEL, LEAVE_CATEGORY_LABEL, LEAVE_FUND_LABEL, DAY_CALC_LABEL, PUNCH_SOURCE_LABEL } from '@/constants/enums'
 import { PageHeader, Card, CardHeader, CardBody, Spinner, EmptyState, Tabs, Button, Select, Input, Badge, Modal } from '@/components/ui'
 import type { AttendanceRegulation, LeaveType, PunchSource } from '@/types'
+import { useAuthStore } from '@/stores/authStore'
+import { organizationCapabilities } from '@/lib/organizationCapabilities'
 
 export default function AdminRegulations() {
+  const user = useAuthStore((state) => state.user)!
+  const capabilities = organizationCapabilities(user.effectivePermissions ?? [])
   const { tab = 'attendance' } = useParams<{ tab?: string }>()
   const [active, setActive] = useState(tab === 'leave' ? 'leave' : 'attendance')
+  const tabs = [
+    ...(capabilities.canViewRegulations ? [{ key: 'attendance', label: 'Chấm công' }] : []),
+    ...(capabilities.canViewLeaveTypes ? [{ key: 'leave', label: 'Loại nghỉ phép' }] : []),
+  ]
+  const visibleTab = tabs.some((item) => item.key === active) ? active : tabs[0]?.key ?? 'attendance'
   return (
     <div>
       <PageHeader title="Quy định" subtitle="Cấu hình quy chế chấm công & loại nghỉ phép" />
-      <Tabs active={active} onChange={setActive} tabs={[{ key: 'attendance', label: 'Chấm công' }, { key: 'leave', label: 'Loại nghỉ phép' }]} />
-      <div className="mt-5">{active === 'attendance' ? <AttendanceReg /> : <LeaveTypesReg />}</div>
+      <Tabs active={visibleTab} onChange={setActive} tabs={tabs} />
+      <div className="mt-5">{visibleTab === 'attendance'
+        ? <AttendanceReg canManage={capabilities.canManageRegulations} />
+        : <LeaveTypesReg canManage={capabilities.canManageLeaveTypes} />}</div>
     </div>
   )
 }
 
-function AttendanceReg() {
+function AttendanceReg({ canManage }: { canManage: boolean }) {
   const qc = useQueryClient()
   const { data: reg, isLoading } = useQuery({ queryKey: ['regulation', 'attendance'], queryFn: () => regulationsApi.attendance() })
   const [draft, setDraft] = useState<AttendanceRegulation | null>(null)
@@ -91,7 +102,7 @@ function AttendanceReg() {
           </CardBody>
         </Card>
 
-        <Button icon={<Save className="h-4 w-4" />} loading={save.isPending} onClick={() => save.mutate(draft ?? {})}>Lưu quy định</Button>
+        {canManage && <Button icon={<Save className="h-4 w-4" />} loading={save.isPending} onClick={() => save.mutate(draft ?? {})}>Lưu quy định</Button>}
       </div>
 
       <div className="space-y-5">
@@ -125,7 +136,7 @@ function Toggle({ label, checked, onChange }: { label: string; checked: boolean;
   )
 }
 
-function LeaveTypesReg() {
+function LeaveTypesReg({ canManage }: { canManage: boolean }) {
   const qc = useQueryClient()
   const { data: types, isLoading } = useQuery({ queryKey: ['regulation', 'leaveTypes'], queryFn: () => regulationsApi.leaveTypes() })
   const [edit, setEdit] = useState<LeaveType | null>(null)
@@ -141,7 +152,7 @@ function LeaveTypesReg() {
       {(types ?? []).map((t) => (
         <Card key={t.id}>
           <CardHeader title={t.name} subtitle={LEAVE_CATEGORY_LABEL[t.category].label} icon={<CalendarDays className="h-4 w-4" />} action={
-            <Button size="sm" variant="secondary" onClick={() => setEdit(t)}>Sửa</Button>
+            canManage ? <Button size="sm" variant="secondary" onClick={() => setEdit(t)}>Sửa</Button> : undefined
           } />
           <CardBody className="space-y-1.5 text-sm">
             <Row k="Quỹ phép" v={LEAVE_FUND_LABEL[t.fundType]} />

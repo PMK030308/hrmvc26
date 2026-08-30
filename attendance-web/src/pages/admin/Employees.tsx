@@ -10,21 +10,25 @@ import {
   PageHeader, Card, CardHeader, Spinner, EmptyState, Avatar, StatusBadge, Button, Modal,
   Input, Select, Textarea, ConfirmDialog, Badge,
 } from '@/components/ui'
-import type { Employee } from '@/types'
+import type { Employee, EmployeeProjection } from '@/types'
+import { useAuthStore } from '@/stores/authStore'
+import { organizationCapabilities } from '@/lib/organizationCapabilities'
 
 const empty: Partial<Employee> = { firstName: '', lastName: '', gender: 1, email: '', phone: '', status: 1, workNature: 1, contractType: 2, wage: 0, maritalStatus: 'Single' }
 
 export default function AdminEmployees() {
+  const user = useAuthStore((state) => state.user)!
+  const capabilities = organizationCapabilities(user.effectivePermissions ?? [])
   const qc = useQueryClient()
   const [q, setQ] = useState('')
   const [dept, setDept] = useState('')
   const [editing, setEditing] = useState<Partial<Employee> | null>(null)
-  const [del, setDel] = useState<Employee | null>(null)
+  const [del, setDel] = useState<EmployeeProjection | null>(null)
 
-  const { data: emps, isLoading } = useQuery({ queryKey: ['org', 'employees', { dept, q }], queryFn: () => orgApi.employees({ departmentId: dept || undefined, search: q || undefined }) })
-  const { data: departments } = useQuery({ queryKey: ['org', 'departments'], queryFn: () => orgApi.departments() })
-  const { data: positions } = useQuery({ queryKey: ['org', 'positions'], queryFn: () => orgApi.positions() })
-  const { data: branches } = useQuery({ queryKey: ['org', 'branches'], queryFn: () => orgApi.branches() })
+  const { data: emps, isLoading } = useQuery({ queryKey: ['org', 'employees', { dept, q }], queryFn: () => orgApi.employees({ departmentId: dept || undefined, search: q || undefined }), enabled: capabilities.canViewEmployees })
+  const { data: departments } = useQuery({ queryKey: ['org', 'departments'], queryFn: () => orgApi.departments(), enabled: capabilities.canViewCatalog })
+  const { data: positions } = useQuery({ queryKey: ['org', 'positions'], queryFn: () => orgApi.positions(), enabled: capabilities.canViewCatalog })
+  const { data: branches } = useQuery({ queryKey: ['org', 'branches'], queryFn: () => orgApi.branches(), enabled: capabilities.canViewCatalog })
 
   const save = useMutation({
     mutationFn: (p: Partial<Employee>) => editing?.id ? orgApi.updateEmployee(editing.id, p) : orgApi.createEmployee(p),
@@ -32,8 +36,8 @@ export default function AdminEmployees() {
     onError: (e: Error) => toast.error(e.message),
   })
   const remove = useMutation({
-    mutationFn: (id: string) => orgApi.deleteEmployee(id),
-    onSuccess: () => { toast.success('Đã xóa nhân viên'); setDel(null); qc.invalidateQueries({ queryKey: ['org'] }) },
+    mutationFn: (id: string) => orgApi.deactivateEmployee(id),
+    onSuccess: () => { toast.success('Đã chuyển nhân viên sang trạng thái nghỉ việc'); setDel(null); qc.invalidateQueries({ queryKey: ['org'] }) },
     onError: (e: Error) => toast.error(e.message),
   })
 
@@ -43,7 +47,9 @@ export default function AdminEmployees() {
   return (
     <div>
       <PageHeader title="Nhân viên" subtitle="Quản lý hồ sơ nhân sự" actions={
-        <Button icon={<Plus className="h-4 w-4" />} onClick={() => setEditing({ ...empty })}>Thêm nhân viên</Button>
+        capabilities.canManageEmployees
+          ? <Button icon={<Plus className="h-4 w-4" />} onClick={() => setEditing({ ...empty })}>Thêm nhân viên</Button>
+          : undefined
       } />
 
       <Card>
@@ -86,14 +92,14 @@ export default function AdminEmployees() {
                       </div>
                     </td>
                     <td className="px-4 py-3"><p className="text-slate-700">{deptName(e.departmentId)}</p><p className="text-xs text-slate-400">{posName(e.positionId)}</p></td>
-                    <td className="px-4 py-3"><p className="flex items-center gap-1 text-xs text-slate-600"><Mail className="h-3 w-3" />{e.email}</p><p className="flex items-center gap-1 text-xs text-slate-400"><Phone className="h-3 w-3" />{e.phone}</p></td>
+                    <td className="px-4 py-3"><p className="flex items-center gap-1 text-xs text-slate-600"><Mail className="h-3 w-3" />{e.email}</p>{capabilities.canViewPrivate && <p className="flex items-center gap-1 text-xs text-slate-400"><Phone className="h-3 w-3" />{e.phone || '—'}</p>}</td>
                     <td className="px-4 py-3"><StatusBadge map={EMPLOYEE_STATUS_LABEL} value={e.status} /></td>
-                    <td className="px-4 py-3 text-slate-600">{fmtDate(e.hireDate)}</td>
+                    <td className="px-4 py-3 text-slate-600">{e.hireDate ? fmtDate(e.hireDate) : '—'}</td>
                     <td className="px-4 py-3 text-right">
-                      <div className="flex justify-end gap-1">
+                      {capabilities.canManageEmployees && <div className="flex justify-end gap-1">
                         <button onClick={() => setEditing(e)} className="grid h-8 w-8 place-items-center rounded-lg text-slate-500 hover:bg-slate-100" title="Sửa"><Pencil className="h-4 w-4" /></button>
-                        <button onClick={() => setDel(e)} className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-danger-50 hover:text-danger-600" title="Xóa"><Trash2 className="h-4 w-4" /></button>
-                      </div>
+                        <button onClick={() => setDel(e)} className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-danger-50 hover:text-danger-600" title="Cho nghỉ việc"><Trash2 className="h-4 w-4" /></button>
+                      </div>}
                     </td>
                   </tr>
                 ))}
@@ -109,31 +115,33 @@ export default function AdminEmployees() {
           <Button variant="secondary" onClick={() => setEditing(null)}>Hủy</Button>
           <Button loading={save.isPending} onClick={() => save.mutate(editing!)}>Lưu</Button>
         </>}>
-        {editing && <EmployeeForm value={editing} onChange={setEditing} departments={departments} positions={positions} branches={branches} />}
+        {editing && <EmployeeForm value={editing} onChange={setEditing} departments={departments} positions={positions} branches={branches}
+          canViewPrivate={capabilities.canViewPrivate} canViewCompensation={capabilities.canViewCompensation} />}
       </Modal>
 
       <ConfirmDialog open={!!del} onClose={() => setDel(null)} danger
-        title="Xóa nhân viên" message={`Xóa "${del?.fullName}"? Hành động không thể hoàn tác.`}
-        confirmText="Xóa" onConfirm={() => del && remove.mutate(del.id)} />
+        title="Cho nhân viên nghỉ việc" message={`Chuyển "${del?.fullName}" sang trạng thái nghỉ việc? Hồ sơ và lịch sử vẫn được giữ lại.`}
+        confirmText="Xác nhận nghỉ việc" onConfirm={() => del && remove.mutate(del.id)} />
     </div>
   )
 }
 
-function EmployeeForm({ value, onChange, departments, positions, branches }: {
+function EmployeeForm({ value, onChange, departments, positions, branches, canViewPrivate, canViewCompensation }: {
   value: Partial<Employee>; onChange: (v: Partial<Employee>) => void
   departments?: { id: string; name: string }[]; positions?: { id: string; name: string }[]; branches?: { id: string; name: string }[]
+  canViewPrivate: boolean; canViewCompensation: boolean
 }) {
   const set = (k: keyof Employee, v: any) => onChange({ ...value, [k]: v })
   return (
     <div className="grid grid-cols-2 gap-4">
-      <Input label="Họ" value={value.lastName ?? ''} onChange={(e) => set('lastName', e.target.value)} />
-      <Input label="Tên" value={value.firstName ?? ''} onChange={(e) => set('firstName', e.target.value)} />
+      {canViewPrivate && <Input label="Họ" value={value.lastName ?? ''} onChange={(e) => set('lastName', e.target.value)} />}
+      {canViewPrivate && <Input label="Tên" value={value.firstName ?? ''} onChange={(e) => set('firstName', e.target.value)} />}
       <Input label="Mã NV" value={value.employeeCode ?? ''} onChange={(e) => set('employeeCode', e.target.value)} placeholder="Tự sinh nếu trống" />
-      <Select label="Giới tính" value={value.gender ?? 1} onChange={(e) => set('gender', Number(e.target.value))}>
+      {canViewPrivate && <Select label="Giới tính" value={value.gender ?? 1} onChange={(e) => set('gender', Number(e.target.value))}>
         {Object.entries(GENDER_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-      </Select>
+      </Select>}
       <Input label="Email" type="email" value={value.email ?? ''} onChange={(e) => set('email', e.target.value)} />
-      <Input label="Số điện thoại" value={value.phone ?? ''} onChange={(e) => set('phone', e.target.value)} />
+      {canViewPrivate && <Input label="Số điện thoại" value={value.phone ?? ''} onChange={(e) => set('phone', e.target.value)} />}
       <Select label="Phòng ban" value={value.departmentId ?? ''} onChange={(e) => set('departmentId', e.target.value)}>
         <option value="">-- Chọn --</option>
         {(departments ?? []).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
@@ -149,16 +157,16 @@ function EmployeeForm({ value, onChange, departments, positions, branches }: {
       <Select label="Trạng thái" value={value.status ?? 1} onChange={(e) => set('status', Number(e.target.value))}>
         {(Object.entries(EMPLOYEE_STATUS_LABEL) as [string, { label: string }][]).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
       </Select>
-      <Select label="Tính chất công việc" value={value.workNature ?? 1} onChange={(e) => set('workNature', Number(e.target.value))}>
+      {canViewPrivate && <Select label="Tính chất công việc" value={value.workNature ?? 1} onChange={(e) => set('workNature', Number(e.target.value))}>
         {Object.entries(WORK_NATURE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-      </Select>
-      <Select label="Loại hợp đồng" value={value.contractType ?? 2} onChange={(e) => set('contractType', Number(e.target.value))}>
+      </Select>}
+      {canViewPrivate && <Select label="Loại hợp đồng" value={value.contractType ?? 2} onChange={(e) => set('contractType', Number(e.target.value))}>
         {Object.entries(CONTRACT_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-      </Select>
-      <Input label="Ngày vào làm" type="date" value={value.hireDate ?? ''} onChange={(e) => set('hireDate', e.target.value)} />
-      <Input label="Lương cơ bản (VND)" type="number" value={value.wage ?? 0} onChange={(e) => set('wage', Number(e.target.value))} />
-      <div className="col-span-2"><Textarea label="Địa chỉ" rows={2} value={value.address ?? ''} onChange={(e) => set('address', e.target.value)} /></div>
-      {value.id && <div className="col-span-2"><Badge tone="info">Lương hiện tại: {fmtCurrency(value.wage ?? 0)}</Badge></div>}
+      </Select>}
+      {canViewPrivate && <Input label="Ngày vào làm" type="date" value={value.hireDate ?? ''} onChange={(e) => set('hireDate', e.target.value)} />}
+      {canViewCompensation && <Input label="Lương cơ bản (VND)" type="number" value={value.wage ?? 0} onChange={(e) => set('wage', Number(e.target.value))} />}
+      {canViewPrivate && <div className="col-span-2"><Textarea label="Địa chỉ" rows={2} value={value.address ?? ''} onChange={(e) => set('address', e.target.value)} /></div>}
+      {canViewCompensation && value.id && <div className="col-span-2"><Badge tone="info">Lương hiện tại: {fmtCurrency(value.wage ?? 0)}</Badge></div>}
     </div>
   )
 }
