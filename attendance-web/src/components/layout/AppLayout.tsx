@@ -13,6 +13,7 @@ import { ChatbotWidget } from '@/components/chatbot/ChatbotWidget'
 import { orgApi } from '@/api/org'
 import { useQuery } from '@tanstack/react-query'
 import { cn } from '@/lib/cn'
+import { phase6Capabilities } from '@/lib/phase6Capabilities'
 
 function SidebarItem({ item, onNav }: { item: NavItem; onNav?: () => void }) {
   const Icon = item.icon
@@ -105,6 +106,7 @@ function UserMenu({ placement = 'topbar' }: { placement?: 'sidebar' | 'topbar' }
 
 export function AppLayout() {
   const user = useAuthStore((s) => s.user)!
+  const chatbotCapabilities = phase6Capabilities(user.effectivePermissions ?? [])
   const sidebarOpen = useUIStore((s) => s.sidebarOpen)
   const setSidebar = useUIStore((s) => s.setSidebar)
   const location = useLocation()
@@ -201,7 +203,7 @@ export function AppLayout() {
         </nav>
       </div>
 
-      <ChatbotWidget />
+      {chatbotCapabilities.canUseChatbot && <ChatbotWidget />}
     </div>
   )
 }
