@@ -2,6 +2,7 @@ import type { RoleCode } from '../types.js'
 import { REQUEST_PERMISSIONS } from './requestAuthorization.js'
 import { ATTENDANCE_PERMISSIONS } from './attendanceAuthorization.js'
 import { DELEGATION_PERMISSIONS } from './delegationAuthorization.js'
+import { ORGANIZATION_PERMISSIONS } from './organizationAuthorization.js'
 
 export interface PermissionDefinition {
   key: string
@@ -50,11 +51,16 @@ export const PERMISSION_CATALOG: readonly PermissionDefinition[] = [
   { key: 'shifts.schedule.view_all', module: 'shifts', label: 'Xem lịch làm việc toàn công ty', enforced: true, defaultRoles: ['Admin'] },
   { key: 'shifts.schedule.manage_scoped', module: 'shifts', label: 'Phân ca theo effective scope', enforced: true, defaultRoles: ['HR'] },
   { key: 'shifts.schedule.manage_all', module: 'shifts', label: 'Phân ca toàn công ty', enforced: true, defaultRoles: ['Admin'] },
-  { key: 'org.employee.view', module: 'org', label: 'Xem nhân viên', enforced: false, defaultRoles: ['Manager', 'HR', 'Admin'] },
-  { key: 'org.employee.manage', module: 'org', label: 'Quản lý nhân viên', enforced: false, defaultRoles: ['HR', 'Admin'] },
+  { key: ORGANIZATION_PERMISSIONS.CATALOG_VIEW, module: 'org', label: 'Xem danh mục tổ chức', enforced: true, defaultRoles: ['Manager', 'Accountant', 'HR', 'Director', 'Admin'] },
+  { key: ORGANIZATION_PERMISSIONS.EMPLOYEE_VIEW_SCOPED, module: 'org', label: 'Xem nhân viên theo effective scope', enforced: true, defaultRoles: ['Manager', 'HR'] },
+  { key: ORGANIZATION_PERMISSIONS.EMPLOYEE_VIEW_ALL, module: 'org', label: 'Xem toàn bộ nhân viên', enforced: true, defaultRoles: ['Accountant', 'Director', 'Admin'] },
+  { key: ORGANIZATION_PERMISSIONS.EMPLOYEE_VIEW_PRIVATE, module: 'org', label: 'Xem thông tin nhân sự riêng tư', enforced: true, defaultRoles: ['HR', 'Admin'] },
+  { key: ORGANIZATION_PERMISSIONS.EMPLOYEE_VIEW_COMPENSATION, module: 'org', label: 'Xem thông tin lương nhân viên', enforced: true, defaultRoles: ['Accountant', 'Admin'] },
+  { key: ORGANIZATION_PERMISSIONS.EMPLOYEE_MANAGE_SCOPED, module: 'org', label: 'Quản lý nhân viên theo effective scope', enforced: true, defaultRoles: ['HR'] },
+  { key: ORGANIZATION_PERMISSIONS.EMPLOYEE_MANAGE_ALL, module: 'org', label: 'Quản lý toàn bộ nhân viên', enforced: true, defaultRoles: ['Admin'] },
   { key: DELEGATION_PERMISSIONS.CREATE, module: 'delegation', label: 'Tạo ủy quyền duyệt', enforced: true, defaultRoles: approver },
   { key: DELEGATION_PERMISSIONS.REVOKE_OWN, module: 'delegation', label: 'Thu hồi ủy quyền do mình tạo', enforced: true, defaultRoles: approver },
-  { key: DELEGATION_PERMISSIONS.REVOKE_ANY, module: 'delegation', label: 'Thu hồi ủy quyền của người khác', enforced: true, defaultRoles: [] },
+  { key: DELEGATION_PERMISSIONS.REVOKE_ANY, module: 'delegation', label: 'Thu hồi ủy quyền của người khác', enforced: true, defaultRoles: ['Admin'] },
   { key: DELEGATION_PERMISSIONS.VIEW_ALL, module: 'delegation', label: 'Xem tất cả ủy quyền', enforced: true, defaultRoles: ['HR', 'Admin'] },
   { key: 'timesheet.view_own', module: 'timesheet', label: 'Xem bảng công của mình', enforced: false, defaultRoles: employee },
   { key: 'timesheet.view_scoped', module: 'timesheet', label: 'Xem bảng công theo scope', enforced: false, defaultRoles: ['Manager', 'HR', 'Admin'] },
