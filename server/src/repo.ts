@@ -40,6 +40,8 @@ export function mapUser(r: any) {
   return {
     id: r.id, email: r.email, employeeId: r.employee_id, roles: json(r.roles, []),
     permissions: json(r.permissions, []), departmentScopes: json(r.department_scopes, []),
+    isActive: r.is_active == null ? true : bool(r.is_active),
+    authorizationVersion: Number(r.authz_version ?? 1),
   }
 }
 export const getUserById = (id: string) => {

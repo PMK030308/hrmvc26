@@ -42,3 +42,12 @@ export function GuestOnly({ children }: { children: ReactNode }) {
   if (user) return <Navigate to={homeForRoles(user.roles)} replace />
   return <>{children}</>
 }
+
+/** Presentation guard theo capability DB-fresh; backend vẫn là nơi quyết định quyền. */
+export function RequirePermission({ permission, children }: { permission: string; children: ReactNode }) {
+  const user = useAuthStore((s) => s.user)!
+  if (!user.effectivePermissions?.includes(permission)) {
+    return <Navigate to={homeForRoles(user.roles)} replace />
+  }
+  return <>{children}</>
+}

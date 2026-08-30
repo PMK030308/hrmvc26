@@ -42,4 +42,6 @@ export interface AuthUser {
   roles: string[]
   permissions: string[]
   departmentScopes: string[]
+  isActive?: boolean
+  authorizationVersion?: number
 }

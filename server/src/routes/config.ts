@@ -1,10 +1,14 @@
 // Config routes: quy định chấm công, loại nghỉ, role/permission, profile (§9/§11)
 import { Router } from 'express'
 import { db } from '../db.js'
-import { requireAuth, requireRole, type AuthedRequest } from '../middleware/auth.js'
-import { getRegulation, mapRegulation, getEmployee, mapUser, uid } from '../repo.js'
+import { requireAuth, requirePermission, requireRole, type AuthedRequest } from '../middleware/auth.js'
+import { getRegulation, mapRegulation, getEmployee, getUserById, mapUser, uid } from '../repo.js'
 import { httpError } from '../types.js'
 import { pushAudit } from '../helpers.js'
+import {
+  getPermissionMatrixSnapshot, replacePermissionMatrix, updateAuthorizationUser, validateGenericPermissionMatrix,
+  ALL_ROLES, type PermissionMatrixEntry,
+} from '../services/permissionService.js'
 
 export const configRouter = Router()
 
@@ -90,44 +94,51 @@ configRouter.put('/leave-types/:id', requireAuth, requireRole('HR', 'Admin'), (r
 })
 
 /* ----------------------------- Role / permission -------------------------- */
-const FEATURE_PERMS = [
-  { feature: 'attendance.punch', perms: { Employee: ['View'], Manager: ['View'], HR: ['View'], Admin: ['View'] } },
-  { feature: 'requests.create', perms: { Employee: ['Create'], Manager: ['Create'], HR: ['Create'], Admin: ['Create'] } },
-  { feature: 'requests.approve', perms: { Manager: ['Approve'], HR: ['Approve'], Director: ['Approve'], Admin: ['Approve'] } },
-  { feature: 'attendance.proxy', perms: { Manager: ['Create'], HR: ['Create'], Admin: ['Create'] } },
-  { feature: 'timesheet.view', perms: { Employee: ['View'], Manager: ['View'], HR: ['View'], Director: ['View'], Admin: ['View'] } },
-  { feature: 'payroll.manage', perms: { Accountant: ['View', 'Edit'], HR: ['View'], Director: ['Approve'], Admin: ['View'] } },
-  { feature: 'regulations.edit', perms: { HR: ['Edit'], Admin: ['Edit'] } },
-  { feature: 'roles.manage', perms: { Admin: ['View', 'Edit'] } },
-  { feature: 'audit.view', perms: { Admin: ['View'] } },
-  { feature: 'reports.view', perms: { Manager: ['View'], Accountant: ['View'], HR: ['View'], Director: ['View'], Admin: ['View'] } },
-]
-
-configRouter.get('/roles/matrix', requireAuth, requireRole('Admin'), (_req, res) => {
-  res.json(FEATURE_PERMS.map((f) => ({
-    feature: f.feature,
-    perms: Object.entries(f.perms).map(([role, flags]) => ({ role, flags })),
-  })))
+configRouter.get('/roles/matrix', requireAuth, requirePermission('config.permission.manage'), (_req, res, next) => {
+  try { res.json(getPermissionMatrixSnapshot()) }
+  catch (e) { next(e) }
 })
 
-configRouter.get('/roles/users', requireAuth, requireRole('Admin'), (_req, res) => {
-  res.json((db.prepare('SELECT * FROM users').all() as any[]).map(mapUser))
-})
-
-configRouter.put('/roles/users/:userId', requireAuth, requireRole('Admin'), (req: AuthedRequest, res, next) => {
+configRouter.put('/roles/matrix', requireAuth, requirePermission('config.permission.manage'), (req: AuthedRequest, res, next) => {
   try {
-    const row = db.prepare('SELECT * FROM users WHERE id=?').get(req.params.userId) as any
-    if (!row) throw httpError(404, 'Không tìm thấy user.')
-    const roles = req.body ?? []
-    db.prepare('UPDATE users SET roles=? WHERE id=?').run(JSON.stringify(roles), req.params.userId)
-    pushAudit(req.user!.id, req.user!.email, 2, 'User', req.params.userId, `Cập nhật role cho ${row.email}: ${roles.join(', ')}`)
-    res.json(mapUser({ ...row, roles: JSON.stringify(roles) }))
+    const body = req.body ?? {}
+    try { validateGenericPermissionMatrix(body.permissions as PermissionMatrixEntry[]) }
+    catch { throw httpError(400, 'Ma trận quyền không hợp lệ hoặc không đầy đủ.') }
+    res.json(replacePermissionMatrix({
+      expectedVersion: Number(body.expectedVersion),
+      permissions: body.permissions,
+    }, req.user!.id))
   } catch (e) { next(e) }
 })
 
-configRouter.post('/roles/users', requireAuth, requireRole('Admin'), (req: AuthedRequest, res, next) => {
+configRouter.get('/roles/users', requireAuth, requirePermission('config.user.manage'), (_req, res) => {
+  res.json((db.prepare('SELECT * FROM users').all() as any[]).map(mapUser))
+})
+
+configRouter.put('/roles/users/:userId', requireAuth, requirePermission('config.user.manage'), (req: AuthedRequest, res, next) => {
+  try {
+    const { roles, isActive, departmentScopes, expectedVersion } = req.body ?? {}
+    res.json(updateAuthorizationUser({
+      actorId: req.user!.id,
+      targetUserId: req.params.userId,
+      roles,
+      isActive,
+      departmentScopes,
+      expectedVersion: Number(expectedVersion),
+    }))
+  } catch (e) { next(e) }
+})
+
+configRouter.post('/roles/users', requireAuth, requirePermission('config.user.manage'), (req: AuthedRequest, res, next) => {
   try {
     const { email, employeeId, roles } = req.body ?? {}
+    if (typeof email !== 'string' || !email.includes('@') || typeof employeeId !== 'string') {
+      throw httpError(400, 'Thông tin tài khoản không hợp lệ.')
+    }
+    if (!Array.isArray(roles) || roles.length === 0 || new Set(roles).size !== roles.length || roles.some((role) => !ALL_ROLES.includes(role))) {
+      throw httpError(400, 'Danh sách vai trò không hợp lệ.')
+    }
+    if (!getEmployee(employeeId)) throw httpError(404, 'Không tìm thấy nhân viên liên kết.')
     const id = uid('usr')
     const perms = ['View']
     db.prepare('INSERT INTO users (id, email, employee_id, password_hash, roles, permissions, department_scopes) VALUES (?,?,?,?,?,?,?)')

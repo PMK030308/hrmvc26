@@ -9,14 +9,53 @@ export type RoleCode = 'Guest' | 'Employee' | 'Manager' | 'Accountant' | 'HR' | 
 export type PermissionFlag =
   | 'View' | 'Create' | 'Edit' | 'Delete' | 'Export' | 'Approve'
 
+export type RequestPermission =
+  | 'requests.request.create_own'
+  | 'requests.request.view_own'
+  | 'requests.request.view_related'
+  | 'requests.request.view_scoped'
+  | 'requests.request.view_all'
+  | 'requests.request.modify_own'
+  | 'requests.request.cancel_own'
+  | 'requests.approval.approve_assigned'
+  | 'requests.approval.reject_assigned'
+  | 'requests.attachment.read_related'
+  | 'requests.attachment.upload_own'
+  | 'requests.attachment.upload_related'
+  | 'requests.attachment.delete_own'
+  | 'requests.shift_swap.respond_as_partner'
+
+export interface RequestPermissionMatrixRow {
+  permission: RequestPermission
+  roles: Record<RoleCode, boolean>
+}
+
+export interface PermissionMatrixEntry {
+  key: string
+  module: string
+  label: string
+  enforced: boolean
+  roles: Record<RoleCode, boolean>
+}
+
+export interface PermissionMatrixSnapshot {
+  version: number
+  permissions: PermissionMatrixEntry[]
+}
+
 export interface User {
   id: string
   email: string
   employeeId: string
   roles: RoleCode[]
   permissions: PermissionFlag[]
+  effectivePermissions: string[]
+  effectiveDepartmentScopes?: string[]
   /** Scope phòng ban giới hạn thao tác (manager chỉ thấy NV phòng mình) */
   departmentScopes: string[]
+  isActive: boolean
+  authorizationVersion: number
+  permissionMatrixVersion?: number
 }
 
 export interface AuthResult {
@@ -374,7 +413,15 @@ export interface BaseRequest {
   createdAt: string
   updatedAt: string
   currentLevel: number
-  capabilities: { canEdit: boolean; canCancel: boolean; canRespond: boolean }
+  capabilities: {
+    canEdit: boolean
+    canCancel: boolean
+    canRespond: boolean
+    canApprove: boolean
+    canReject: boolean
+    canUploadAttachment: boolean
+    canDeleteAttachment: boolean
+  }
   attachments: RequestAttachment[]
   approvals: RequestApproval[]
 }

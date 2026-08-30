@@ -14,6 +14,14 @@ import {
 import { recomputeRecord } from './attendance.js'
 import { workingDays, calendarDays, parseISO, isoNow, ymd, nowVn } from '../lib/date.js'
 import { pushAudit } from '../helpers.js'
+import {
+  REQUEST_PERMISSIONS, canApproveCurrentStep, canCancelRequest, canManageRequestAttachment, canModifyRequest, canRespondToShiftSwap,
+} from '../authz/requestAuthorization.js'
+import { assertActorPermission } from '../authz/authorizationAssertions.js'
+import { loadAuthorizationActor } from '../authz/authorizationActor.js'
+import {
+  assertAuthorizedAction, assertViewableActionTarget, loadRequestActor, loadRequestAuthorizationContext,
+} from '../authz/requestAuthorizationContext.js'
 
 type RequestType = 'leaves' | 'late-earlies' | 'overtimes' | 'business-trips' | 'shift-swaps' | 'attendance-updates'
 type RoleCode = 'Guest' | 'Employee' | 'Manager' | 'Accountant' | 'HR' | 'Director' | 'Admin'
@@ -176,6 +184,7 @@ function insertApprovalRow(requestId: string, type: RequestType, level: number, 
 
 /* --------------------------- Tạo đơn -------------------------------------- */
 export function createRequest(userId: string, type: RequestType, payload: any): any {
+  assertActorPermission(loadAuthorizationActor(userId), REQUEST_PERMISSIONS.CREATE_OWN)
   const user = getUserById(userId)!
   const emp = getEmployee(user.employeeId)!
   const now = isoNow()
@@ -244,136 +253,175 @@ function initApproval(req: any): void {
 
 /* --------------------------- Duyệt / Từ chối ------------------------------ */
 export function approveRequest(userId: string, type: RequestType, id: string, comment: string, expectedVersion: number): any {
-  const row = findReqRow(type, id)
-  ensureVersion(row, expectedVersion)
-  if (row.status !== 2 && row.status !== 8) throw httpError(409, 'Đơn không ở trạng thái chờ duyệt.')
+  return db.transaction(() => {
+    const actor = loadRequestActor(userId)
+    const context = loadRequestAuthorizationContext(type, id)
+    if (!context) throw httpError(404, 'Không tìm thấy đơn.')
+    assertViewableActionTarget(actor, context)
+    ensureVersion(findReqRow(type, id), expectedVersion)
+    assertAuthorizedAction(actor, context, canApproveCurrentStep(actor, context, 'approve'))
 
-  const flow = FLOWS[type]
-  const currentLevel = row.current_level
-  const apRow = db.prepare('SELECT * FROM request_approvals WHERE request_id=? AND level=?').get(id, currentLevel) as any
-  if (apRow) db.prepare('UPDATE request_approvals SET status=3, comment=?, approved_at=? WHERE id=?').run(comment, isoNow(), apRow.id)
+    const row = findReqRow(type, id)
+    const flow = FLOWS[type]
+    const currentLevel = row.current_level
+    const apRow = db.prepare('SELECT * FROM request_approvals WHERE request_id=? AND level=? AND status=2').get(id, currentLevel) as any
+    if (!apRow) throw httpError(409, 'Bước duyệt hiện tại đã được xử lý.')
+    const approvalUpdate = db.prepare('UPDATE request_approvals SET status=3, comment=?, approved_at=? WHERE id=? AND status=2').run(comment, isoNow(), apRow.id)
+    if (approvalUpdate.changes !== 1) throw httpError(409, 'Bước duyệt hiện tại đã được xử lý.')
 
-  // Vết audit — ghi rõ "thay mặt" nếu duyệt qua ủy quyền
-  const auditDetail = `Duyệt ${labelType(type)} cấp ${currentLevel}${apRow?.on_behalf_of_name ? ` — ${apRow.approver_name}` : ''}`
-  pushAudit(userId, getUserById(userId)?.email ?? '', 2, 'Request', id, auditDetail)
+    const auditDetail = `Duyệt ${labelType(type)} cấp ${currentLevel}${apRow.on_behalf_of_name ? ` — ${apRow.approver_name}` : ''}`
+    pushAudit(userId, getUserById(userId)?.email ?? '', 2, 'Request', id, auditDetail)
 
-  let prevApproverUserId: string | null = apRow?.approver_user_id ?? null
-  let nextStep: FlowStep | null = null
-  for (const s of flow) {
-    if (s.level <= currentLevel) continue
-    const reqObj = getRequest(type, id)!
-    if (!evalCondition(s.condition, reqObj)) {
-      insertApprovalRow(id, type, s.level, { userId: null, name: '—' }, 5, 'Bỏ qua (điều kiện không thỏa)', isoNow())
-      continue
+    let prevApproverUserId: string | null = apRow.approver_user_id ?? null
+    let nextStep: FlowStep | null = null
+    for (const step of flow) {
+      if (step.level <= currentLevel) continue
+      const request = getRequest(type, id)!
+      if (!evalCondition(step.condition, request)) {
+        insertApprovalRow(id, type, step.level, { userId: null, name: '—' }, 5, 'Bỏ qua (điều kiện không thỏa)', isoNow())
+        continue
+      }
+      const nextApprover = resolveApprover(step.approver, row.employee_id)
+      if (nextApprover.userId && nextApprover.userId === prevApproverUserId) {
+        insertApprovalRow(id, type, step.level, nextApprover, 3, 'Cùng người duyệt — gộp cấp', isoNow())
+        prevApproverUserId = nextApprover.userId
+        continue
+      }
+      nextStep = step
+      break
     }
-    const nap = resolveApprover(s.approver, row.employee_id)
-    if (nap.userId && nap.userId === prevApproverUserId) {
-      // Cùng một người duyệt → tự động duyệt cấp trùng
-      insertApprovalRow(id, type, s.level, nap, 3, 'Cùng người duyệt — gộp cấp', isoNow())
-      prevApproverUserId = nap.userId
-      continue
-    }
-    nextStep = s
-    break
-  }
 
-  if (nextStep) {
-    const nextLevel = nextStep.level
-    const nap = resolveApprover(nextStep.approver, row.employee_id)
-    insertApprovalRow(id, type, nextLevel, nap, 2, null, null)
-    db.prepare('UPDATE requests SET current_level=?, status=2, request_version=request_version+1, updated_at=? WHERE id=?').run(nextLevel, isoNow(), id)
-    if (nap.userId) pushNotification(nap.userId, 'Đơn chuyển đến bạn duyệt',
-      `${row.employee_name} — ${labelType(type)} (cấp ${nextLevel})${nap.onBehalfOfName ? ` (thay mặt ${nap.onBehalfOfName})` : ''}.`,
-      6, 'request', id, `/employee/requests/${type}/${id}`)
-  } else {
-    // Recheck cap OT lúc duyệt cuối (phòng trường hợp HR giảm cap sau khi đơn tạo).
-    if (type === 'overtimes') {
-      const otReq = getRequest(type, id) as any
-      enforceOtCap(otReq.employeeId, otReq.otDate, 0) // đơn đã nằm trong used → addHours=0
-    }
-    db.prepare('UPDATE requests SET status=3, request_version=request_version+1, updated_at=? WHERE id=?').run(isoNow(), id)
-    applyApprovedEffect(type, id)
-    // Tham vấn Giám đốc: đơn nghỉ >3 ngày → thông báo (không chặn)
-    if (type === 'leaves') {
-      const req = getRequest(type, id) as any
-      if (req.totalDays > 3) {
-        const dirUser = (db.prepare('SELECT * FROM users').all() as any[]).find((x) => JSON.parse(x.roles).includes('Director'))
-        if (dirUser) {
-          insertApprovalRow(id, type, 99, { userId: dirUser.id, name: dirUser.email }, 5, 'Tham vấn Giám đốc (thông báo, không chặn)', isoNow())
-          pushNotification(dirUser.id, 'Tham vấn: đơn nghỉ >3 ngày đã duyệt',
-            `${req.employeeName} nghỉ ${req.totalDays} ngày từ ${req.startDate} — trưởng phòng đã duyệt, thông báo Giám đốc biết.`,
-            1, 'request', id, `/employee/requests/leaves/${id}`)
+    if (nextStep) {
+      const nextApprover = resolveApprover(nextStep.approver, row.employee_id)
+      insertApprovalRow(id, type, nextStep.level, nextApprover, 2, null, null)
+      const update = db.prepare(`UPDATE requests SET current_level=?, status=2, request_version=request_version+1, updated_at=?
+        WHERE id=? AND type=? AND request_version=?`).run(nextStep.level, isoNow(), id, type, expectedVersion)
+      if (update.changes !== 1) throw httpError(409, 'Phiên bản đơn đã thay đổi. Vui lòng tải lại.')
+      if (nextApprover.userId) pushNotification(nextApprover.userId, 'Đơn chuyển đến bạn duyệt',
+        `${row.employee_name} — ${labelType(type)} (cấp ${nextStep.level})${nextApprover.onBehalfOfName ? ` (thay mặt ${nextApprover.onBehalfOfName})` : ''}.`,
+        6, 'request', id, `/employee/requests/${type}/${id}`)
+    } else {
+      if (type === 'overtimes') {
+        const overtimeRequest = getRequest(type, id) as any
+        enforceOtCap(overtimeRequest.employeeId, overtimeRequest.otDate, 0)
+      }
+      const update = db.prepare(`UPDATE requests SET status=3, request_version=request_version+1, updated_at=?
+        WHERE id=? AND type=? AND request_version=?`).run(isoNow(), id, type, expectedVersion)
+      if (update.changes !== 1) throw httpError(409, 'Phiên bản đơn đã thay đổi. Vui lòng tải lại.')
+      applyApprovedEffect(type, id)
+      if (type === 'leaves') {
+        const request = getRequest(type, id) as any
+        if (request.totalDays > 3) {
+          const director = (db.prepare('SELECT * FROM users').all() as any[]).find((item) => JSON.parse(item.roles).includes('Director'))
+          if (director) {
+            insertApprovalRow(id, type, 99, { userId: director.id, name: director.email }, 5, 'Tham vấn Giám đốc (thông báo, không chặn)', isoNow())
+            pushNotification(director.id, 'Tham vấn: đơn nghỉ >3 ngày đã duyệt',
+              `${request.employeeName} nghỉ ${request.totalDays} ngày từ ${request.startDate} — trưởng phòng đã duyệt, thông báo Giám đốc biết.`,
+              1, 'request', id, `/employee/requests/leaves/${id}`)
+          }
         }
       }
+      const ownerUser = getUserByEmployeeId(row.employee_id)
+      if (ownerUser) pushNotification(ownerUser.id, 'Đơn được duyệt', `${labelType(type)} của bạn đã được duyệt hoàn toàn.`, 3, 'request', id, `/employee/requests/${type}/${id}`)
     }
+    return getRequest(type, id)!
+  })()
+}
+
+export function rejectRequest(userId: string, type: RequestType, id: string, comment: string, expectedVersion: number): any {
+  return db.transaction(() => {
+    const actor = loadRequestActor(userId)
+    const context = loadRequestAuthorizationContext(type, id)
+    if (!context) throw httpError(404, 'Không tìm thấy đơn.')
+    assertViewableActionTarget(actor, context)
+    ensureVersion(findReqRow(type, id), expectedVersion)
+    assertAuthorizedAction(actor, context, canApproveCurrentStep(actor, context, 'reject'))
+    const row = findReqRow(type, id)
+    const apRow = db.prepare('SELECT * FROM request_approvals WHERE request_id=? AND level=? AND status=2').get(id, row.current_level) as any
+    if (!apRow) throw httpError(409, 'Bước duyệt hiện tại đã được xử lý.')
+    const approvalUpdate = db.prepare('UPDATE request_approvals SET status=4, comment=?, approved_at=? WHERE id=? AND status=2').run(comment, isoNow(), apRow.id)
+    if (approvalUpdate.changes !== 1) throw httpError(409, 'Bước duyệt hiện tại đã được xử lý.')
+    const update = db.prepare(`UPDATE requests SET status=4, request_version=request_version+1, updated_at=?
+      WHERE id=? AND type=? AND request_version=?`).run(isoNow(), id, type, expectedVersion)
+    if (update.changes !== 1) throw httpError(409, 'Phiên bản đơn đã thay đổi. Vui lòng tải lại.')
+    if (type === 'leaves') {
+      const request = getRequest(type, id) as any
+      const leaveType = getLeaveType(request.leaveTypeId)
+      if (leaveType && leaveType.fundType !== 0) adjustBalance(request.employeeId, leaveType.fundType, 'cancel', request.totalDays)
+    }
+    pushAudit(userId, getUserById(userId)?.email ?? '', 2, 'Request', id, `Từ chối ${labelType(type)}: ${comment}`)
     const ownerUser = getUserByEmployeeId(row.employee_id)
-    if (ownerUser) pushNotification(ownerUser.id, 'Đơn được duyệt', `${labelType(type)} của bạn đã được duyệt hoàn toàn.`, 3, 'request', id, `/employee/requests/${type}/${id}`)
-  }
-  return getRequest(type, id)!
+    if (ownerUser) pushNotification(ownerUser.id, 'Đơn bị từ chối', `${labelType(type)} của bạn bị từ chối: ${comment}`, 4, 'request', id, `/employee/requests/${type}/${id}`)
+    return getRequest(type, id)!
+  })()
 }
 
-export function rejectRequest(_userId: string, type: RequestType, id: string, comment: string, expectedVersion: number): any {
-  const row = findReqRow(type, id)
-  ensureVersion(row, expectedVersion)
-  if (row.status !== 2 && row.status !== 8 && row.status !== 6) throw httpError(409, 'Đơn không ở trạng thái có thể xử lý.')
-  const apRow = db.prepare('SELECT * FROM request_approvals WHERE request_id=? AND level=?').get(id, row.current_level) as any
-  if (apRow) db.prepare('UPDATE request_approvals SET status=4, comment=?, approved_at=? WHERE id=?').run(comment, isoNow(), apRow.id)
-  db.prepare('UPDATE requests SET status=4, request_version=request_version+1, updated_at=? WHERE id=?').run(isoNow(), id)
-  if (type === 'leaves') {
-    const req = getRequest(type, id) as any
-    const lt = getLeaveType(req.leaveTypeId)
-    if (lt && lt.fundType !== 0) adjustBalance(req.employeeId, lt.fundType, 'cancel', req.totalDays)
-  }
-  const ownerUser = getUserByEmployeeId(row.employee_id)
-  if (ownerUser) pushNotification(ownerUser.id, 'Đơn bị từ chối', `${labelType(type)} của bạn bị từ chối: ${comment}`, 4, 'request', id, `/employee/requests/${type}/${id}`)
-  return getRequest(type, id)!
+export function cancelRequest(userId: string, type: RequestType, id: string, expectedVersion: number): any {
+  return db.transaction(() => {
+    const actor = loadRequestActor(userId)
+    const context = loadRequestAuthorizationContext(type, id)
+    if (!context) throw httpError(404, 'Không tìm thấy đơn.')
+    assertViewableActionTarget(actor, context)
+    ensureVersion(findReqRow(type, id), expectedVersion)
+    assertAuthorizedAction(actor, context, canCancelRequest(actor, context))
+    if (type === 'leaves') {
+      const request = getRequest(type, id) as any
+      const leaveType = getLeaveType(request.leaveTypeId)
+      if (leaveType && leaveType.fundType !== 0) adjustBalance(request.employeeId, leaveType.fundType, 'cancel', request.totalDays)
+    }
+    const update = db.prepare(`UPDATE requests SET status=5, request_version=request_version+1, updated_at=?
+      WHERE id=? AND type=? AND request_version=?`).run(isoNow(), id, type, expectedVersion)
+    if (update.changes !== 1) throw httpError(409, 'Phiên bản đơn đã thay đổi. Vui lòng tải lại.')
+    pushAudit(userId, getUserById(userId)?.email ?? '', 3, 'Request', id, `Hủy ${labelType(type)}`)
+    return getRequest(type, id)!
+  })()
 }
 
-export function cancelRequest(type: RequestType, id: string, expectedVersion: number): any {
-  const row = findReqRow(type, id)
-  ensureVersion(row, expectedVersion)
-  if (row.status === 3 || row.status === 4 || row.status === 5) throw httpError(409, 'Đơn không thể hủy ở trạng thái này.')
-  if (type === 'leaves') {
-    const req = getRequest(type, id) as any
-    const lt = getLeaveType(req.leaveTypeId)
-    if (lt && lt.fundType !== 0) adjustBalance(req.employeeId, lt.fundType, 'cancel', req.totalDays)
-  }
-  db.prepare('UPDATE requests SET status=5, request_version=request_version+1, updated_at=? WHERE id=?').run(isoNow(), id)
-  return getRequest(type, id)!
-}
-
-export function updateRequest(_userId: string, type: RequestType, id: string, payload: any, expectedVersion: number): any {
-  const row = findReqRow(type, id)
-  ensureVersion(row, expectedVersion)
-  if (row.status !== 1 && row.status !== 2 && row.status !== 6) throw httpError(409, 'Đơn không ở trạng thái có thể sửa.')
-  const updates = payloadForType(type, payload)
-  const setClauses = Object.keys(updates).map((k) => `${k}=?`).join(',')
-  const vals = [...Object.values(updates), isoNow(), id]
-  if (setClauses) db.prepare(`UPDATE requests SET ${setClauses}, request_version=request_version+1, updated_at=? WHERE id=?`).run(...vals)
-  else db.prepare('UPDATE requests SET request_version=request_version+1, updated_at=? WHERE id=?').run(isoNow(), id)
-  return getRequest(type, id)!
+export function updateRequest(userId: string, type: RequestType, id: string, payload: any, expectedVersion: number): any {
+  return db.transaction(() => {
+    const actor = loadRequestActor(userId)
+    const context = loadRequestAuthorizationContext(type, id)
+    if (!context) throw httpError(404, 'Không tìm thấy đơn.')
+    assertViewableActionTarget(actor, context)
+    ensureVersion(findReqRow(type, id), expectedVersion)
+    assertAuthorizedAction(actor, context, canModifyRequest(actor, context))
+    const updates = payloadForType(type, payload)
+    const setClauses = Object.keys(updates).map((key) => `${key}=?`).join(',')
+    const values = Object.values(updates)
+    const sql = setClauses
+      ? `UPDATE requests SET ${setClauses}, request_version=request_version+1, updated_at=? WHERE id=? AND type=? AND request_version=?`
+      : 'UPDATE requests SET request_version=request_version+1, updated_at=? WHERE id=? AND type=? AND request_version=?'
+    const update = db.prepare(sql).run(...values, isoNow(), id, type, expectedVersion)
+    if (update.changes !== 1) throw httpError(409, 'Phiên bản đơn đã thay đổi. Vui lòng tải lại.')
+    pushAudit(userId, getUserById(userId)?.email ?? '', 2, 'Request', id, `Sửa ${labelType(type)}`)
+    return getRequest(type, id)!
+  })()
 }
 
 /* ----------------- Đồng nghiệp xác nhận đổi ca (MutualSwap) --------------- */
 export function partnerRespond(userId: string, id: string, accepted: boolean, comment: string | null, expectedVersion: number): any {
-  const row = db.prepare('SELECT * FROM requests WHERE id=? AND type="shift-swaps"').get(id) as any
-  if (!row) throw httpError(404, 'Không tìm thấy đơn đổi ca.')
-  ensureVersion(row, expectedVersion)
-  if (row.status !== 6) throw httpError(409, 'Đơn không chờ bạn xác nhận.')
-  if (accepted) {
-    db.prepare('UPDATE requests SET swap_partner_status=2, status=2, request_version=request_version+1, updated_at=? WHERE id=?').run(isoNow(), id)
-    const req = getRequest('shift-swaps', id)!
-    initApproval(req)
-  } else {
-    db.prepare('UPDATE requests SET swap_partner_status=3, status=7, request_version=request_version+1, updated_at=? WHERE id=?').run(isoNow(), id)
-  }
-  const req = getRequest('shift-swaps', id)! as any
-  const ownerUser = getUserByEmployeeId(req.employeeId)
-  if (ownerUser) pushNotification(ownerUser.id, accepted ? 'Đồng nghiệp đồng ý đổi ca' : 'Đồng nghiệp từ chối đổi ca',
-    accepted ? `${req.suggestedSwapPartnerName} đã đồng ý đổi ca. Đơn chuyển sang chờ duyệt.` : `${req.suggestedSwapPartnerName} từ chối: ${comment ?? ''}`,
-    accepted ? 3 : 4, 'request', id, `/employee/requests/shift-swaps/${id}`)
-  void userId
-  return req
+  return db.transaction(() => {
+    const actor = loadRequestActor(userId)
+    const context = loadRequestAuthorizationContext('shift-swaps', id)
+    if (!context) throw httpError(404, 'Không tìm thấy đơn đổi ca.')
+    assertViewableActionTarget(actor, context)
+    ensureVersion(findReqRow('shift-swaps', id), expectedVersion)
+    assertAuthorizedAction(actor, context, canRespondToShiftSwap(actor, context))
+    const partnerStatus = accepted ? 2 : 3
+    const requestStatus = accepted ? 2 : 7
+    const update = db.prepare(`UPDATE requests SET swap_partner_status=?, status=?, request_version=request_version+1, updated_at=?
+      WHERE id=? AND type='shift-swaps' AND request_version=? AND status=6 AND swap_partner_status=1`)
+      .run(partnerStatus, requestStatus, isoNow(), id, expectedVersion)
+    if (update.changes !== 1) throw httpError(409, 'Đơn đổi ca đã được xử lý hoặc phiên bản đã thay đổi.')
+    if (accepted) initApproval(getRequest('shift-swaps', id)!)
+    const request = getRequest('shift-swaps', id)! as any
+    pushAudit(userId, getUserById(userId)?.email ?? '', 2, 'ShiftSwap', id, accepted ? 'Đồng ý đổi ca' : 'Từ chối đổi ca')
+    const ownerUser = getUserByEmployeeId(request.employeeId)
+    if (ownerUser) pushNotification(ownerUser.id, accepted ? 'Đồng nghiệp đồng ý đổi ca' : 'Đồng nghiệp từ chối đổi ca',
+      accepted ? `${request.suggestedSwapPartnerName} đã đồng ý đổi ca. Đơn chuyển sang chờ duyệt.` : `${request.suggestedSwapPartnerName} từ chối: ${comment ?? ''}`,
+      accepted ? 3 : 4, 'request', id, `/employee/requests/shift-swaps/${id}`)
+    return request
+  })()
 }
 
 /* ------------------------------ Helper ------------------------------------ */
@@ -494,33 +542,28 @@ function ensureVersion(row: any, expected: number): void {
 
 /* ---------------------- Capabilities & pending ---------------------------- */
 export function computeCapabilities(req: any, userId: string): void {
-  const user = getUserById(userId)
-  const isOwner = user?.employeeId === req.employeeId
+  const actor = loadRequestActor(userId)
+  const context = loadRequestAuthorizationContext(req.type, req.id)
+  if (!context) {
+    req.capabilities = { canEdit: false, canCancel: false, canRespond: false, canApprove: false, canReject: false, canUploadAttachment: false, canDeleteAttachment: false }
+    return
+  }
   req.capabilities = {
-    canEdit: isOwner && (req.status === 1 || req.status === 2 || req.status === 6),
-    canCancel: isOwner && (req.status === 1 || req.status === 2 || req.status === 6 || req.status === 8),
-    canRespond: req.type === 'shift-swaps' && req.swapPartnerStatus === 1 && user?.employeeId === req.suggestedSwapPartnerId,
+    canEdit: canModifyRequest(actor, context),
+    canCancel: canCancelRequest(actor, context),
+    canRespond: canRespondToShiftSwap(actor, context),
+    canApprove: canApproveCurrentStep(actor, context, 'approve'),
+    canReject: canApproveCurrentStep(actor, context, 'reject'),
+    canUploadAttachment: canManageRequestAttachment(actor, context, 'upload'),
+    canDeleteAttachment: canManageRequestAttachment(actor, context, 'delete'),
   }
 }
 
 export function pendingApprovals(userId: string): any[] {
-  const user = getUserById(userId)
-  if (!user) return []
-  const isHR = user.roles.includes('HR') || user.roles.includes('Admin')
-  const isDirector = user.roles.includes('Director') || user.roles.includes('Admin')
-  const isAccountant = user.roles.includes('Accountant') || user.roles.includes('Admin')
+  const actor = loadRequestActor(userId)
   const reqs = allRequests()
   return reqs.filter((r: any) => {
-    if (r.status !== 2 && r.status !== 8) return false
-    const ap = r.approvals.find((a: any) => a.level === r.currentLevel && a.status === 2)
-    if (!ap) return false
-    if (ap.approverUserId === userId) return true
-    // Approver theo vai trò: HR/Accountant/Director thấy đơn chờ vai trò của mình (kể cả qua ủy quyền)
-    const approverName = String(ap.approverName ?? '')
-    if (isHR && (approverName === 'HR' || approverName.includes('(thay mặt HR)'))) return true
-    if (isAccountant && (approverName === 'Accountant' || approverName.includes('(thay mặt Accountant)'))) return true
-    if (isDirector && (approverName === 'Director' || approverName.includes('(thay mặt Director)'))) return true
-    if (user.roles.includes('Admin')) return true
-    return false
+    const context = loadRequestAuthorizationContext(r.type, r.id)
+    return !!context && canApproveCurrentStep(actor, context, 'approve')
   })
 }

@@ -1,5 +1,5 @@
 import { createBrowserRouter, Navigate } from 'react-router-dom'
-import { RequireAuth, RequireRole, GuestOnly } from './guards'
+import { RequireAuth, RequirePermission, RequireRole, GuestOnly } from './guards'
 import { AppLayout } from '@/components/layout/AppLayout'
 import { homeForRoles } from '@/components/layout/nav'
 import { useAuthStore } from '@/stores/authStore'
@@ -88,6 +88,12 @@ export const router = createBrowserRouter([
 
   /* ------------------------------- Admin / HR ------------------------------ */
   {
+    element: <RequireAuth><AppLayout /></RequireAuth>,
+    children: [
+      { path: '/admin/roles', element: <RequirePermission permission="config.permission.manage"><AdminRoles /></RequirePermission> },
+    ],
+  },
+  {
     element: <RequireAuth><RequireRole roles={['HR', 'Admin']}><AppLayout /></RequireRole></RequireAuth>,
     children: [
       { path: '/admin/dashboard', element: <AdminDashboard /> },
@@ -102,7 +108,6 @@ export const router = createBrowserRouter([
       { path: '/admin/payroll', element: <AdminPayroll /> },
       { path: '/admin/reports', element: <AdminReports /> },
       { path: '/admin/regulations/:tab?', element: <AdminRegulations /> },
-      { path: '/admin/roles', element: <AdminRoles /> },
       { path: '/admin/audit', element: <AdminAudit /> },
     ],
   },

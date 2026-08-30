@@ -4,6 +4,7 @@ import { db } from '../db.js'
 import { requireAuth, requireRole, type AuthedRequest } from '../middleware/auth.js'
 import { allEmployees, getEmployee, mapEmployee, mapBranch, mapDepartment, mapPosition, uid } from '../repo.js'
 import { httpError } from '../types.js'
+import { applyEmployeeStatusAuthorizationChange } from '../services/permissionService.js'
 import { pushAudit } from '../helpers.js'
 import { isoNow } from '../lib/date.js'
 import { truncateAndSeed } from '../seed.js'
@@ -76,16 +77,25 @@ orgRouter.put('/employees/:id', requireAuth, requireRole('HR', 'Admin'), (req: A
     for (const k of Object.keys(map)) if (k in p) { sets.push(`${map[k]}=?`); vals.push(p[k]) }
     sets.push('full_name=?'); vals.push(`${lastName} ${firstName}`.trim())
     vals.push(req.params.id)
-    db.prepare(`UPDATE employees SET ${sets.join(',')} WHERE id=?`).run(...vals)
-    pushAudit(req.user!.id, req.user!.email, 2, 'Employee', req.params.id, `Cập nhật NV ${lastName} ${firstName}`.trim())
-    res.json(getEmployee(req.params.id))
+    const updateEmployee = db.transaction(() => {
+      if ('status' in p) applyEmployeeStatusAuthorizationChange(req.params.id, e.status, Number(p.status))
+      db.prepare(`UPDATE employees SET ${sets.join(',')} WHERE id=?`).run(...vals)
+      pushAudit(req.user!.id, req.user!.email, 2, 'Employee', req.params.id, `Cập nhật NV ${lastName} ${firstName}`.trim())
+      return getEmployee(req.params.id)
+    })
+    res.json(updateEmployee.immediate())
   } catch (e) { next(e) }
 })
 
-orgRouter.delete('/employees/:id', requireAuth, requireRole('Admin'), (req: AuthedRequest, res) => {
-  db.prepare('DELETE FROM employees WHERE id=?').run(req.params.id)
-  pushAudit(req.user!.id, req.user!.email, 3, 'Employee', req.params.id, `Xóa NV ${req.params.id}`)
-  res.json({ ok: true })
+orgRouter.delete('/employees/:id', requireAuth, requireRole('Admin'), (req: AuthedRequest, res, next) => {
+  try {
+    if (db.prepare('SELECT 1 FROM users WHERE employee_id=?').get(req.params.id)) {
+      throw httpError(409, 'Không thể xóa nhân viên đang liên kết với tài khoản. Hãy xử lý tài khoản trước.')
+    }
+    db.prepare('DELETE FROM employees WHERE id=?').run(req.params.id)
+    pushAudit(req.user!.id, req.user!.email, 3, 'Employee', req.params.id, `Xóa NV ${req.params.id}`)
+    res.json({ ok: true })
+  } catch (e) { next(e) }
 })
 
 orgRouter.post('/reset-demo', requireAuth, requireRole('Admin'), (_req, res, next) => {

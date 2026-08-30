@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { NavLink, useLocation, useNavigate, Outlet } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Menu, X, LogOut, ChevronDown, ChevronUp, Fingerprint, UserRound, Bell, Sun, Moon, Monitor } from 'lucide-react'
-import { navForRoles, homeForRoles, type NavItem } from './nav'
+import { authorizationNavItem, navForRoles, homeForRoles, type NavItem } from './nav'
 import { useAuthStore } from '@/stores/authStore'
 import { useUIStore } from '@/stores/uiStore'
 import { useRealtime } from '@/hooks/useRealtime'
@@ -108,7 +108,14 @@ export function AppLayout() {
   const sidebarOpen = useUIStore((s) => s.sidebarOpen)
   const setSidebar = useUIStore((s) => s.setSidebar)
   const location = useLocation()
-  const nav = navForRoles(user.roles).filter((it) => !it.roles || it.roles.some((r) => user.roles.includes(r)))
+  const baseNav = navForRoles(user.roles)
+  const withAuthorization = user.effectivePermissions?.includes('config.permission.manage') && !baseNav.some((item) => item.to === authorizationNavItem.to)
+    ? [...baseNav, authorizationNavItem]
+    : baseNav
+  const nav = withAuthorization.filter((item) =>
+    (!item.roles || item.roles.some((role) => user.roles.includes(role)))
+    && (!item.permission || user.effectivePermissions?.includes(item.permission)),
+  )
   useRealtime()
 
   // Mobile bottom nav — 5 mục đầu (mobile-first)

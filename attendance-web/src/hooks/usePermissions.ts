@@ -22,10 +22,13 @@ export function usePermissions() {
 
   function can(feature: string, perm: PermissionFlag): boolean {
     if (!user) return false
-    if (user.roles.includes('Admin')) return true
     const fp = FEATURE_PERMS.find((f) => f.feature === feature)
     if (!fp) return user.permissions.includes(perm)
     return user.roles.some((r) => fp.perms[r]?.includes(perm))
+  }
+
+  function hasPermission(permission: string): boolean {
+    return user?.effectivePermissions?.includes(permission) ?? false
   }
 
   function hasRole(role: RoleCode): boolean {
@@ -36,5 +39,5 @@ export function usePermissions() {
     return roles.some((r) => effectiveRoles.has(r))
   }
 
-  return { can, hasRole, hasAnyRole, roles: user?.roles ?? [] }
+  return { can, hasPermission, hasRole, hasAnyRole, roles: user?.roles ?? [] }
 }

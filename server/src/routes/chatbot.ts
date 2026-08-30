@@ -5,7 +5,8 @@
 // ============================================================================
 import { Router } from 'express'
 import { db } from '../db.js'
-import { requireAuth, type AuthedRequest } from '../middleware/auth.js'
+import { requireAuth, requirePermission, type AuthedRequest } from '../middleware/auth.js'
+import { REQUEST_PERMISSIONS } from '../authz/requestAuthorization.js'
 import { httpError } from '../types.js'
 import { runChat, hasGeminiKey, type FunctionDeclaration, type GeminiContent } from '../lib/gemini.js'
 import { createRequest } from '../engines/request.js'
@@ -459,7 +460,7 @@ chatbotRouter.post('/', requireAuth, async (req: AuthedRequest, res, next) => {
 })
 
 // Xác nhận tạo đơn (sau khi người dùng bấm "Tạo đơn" trên thẻ nháp).
-chatbotRouter.post('/create', requireAuth, async (req: AuthedRequest, res, next) => {
+chatbotRouter.post('/create', requireAuth, requirePermission(REQUEST_PERMISSIONS.CREATE_OWN), async (req: AuthedRequest, res, next) => {
   try {
     const { requestType, fields } = req.body ?? {}
     if (!VALID_TYPES.includes(requestType)) return next(httpError(400, 'Loại đơn không hợp lệ.'))

@@ -25,9 +25,6 @@ export default function RequestDetailPage() {
     queryFn: () => requestsApi.detail(type as RequestType, id),
     enabled: !!type && !!id,
   })
-  const { data: myPending } = useQuery({ queryKey: ['approvals', 'list'], queryFn: () => approvalsApi.list() })
-  const canApprove = !!req && !!myPending?.some((r) => r.id === req.id)
-
   const [actionModal, setActionModal] = useState<null | { kind: 'approve' | 'reject' | 'cancel' | 'partner' }>(null)
   const [comment, setComment] = useState('')
   const [partnerAccept, setPartnerAccept] = useState(true)
@@ -79,7 +76,13 @@ export default function RequestDetailPage() {
           </Card>
 
           <RequestTimeline type={req.type} id={req.id} approvals={req.approvals} />
-          <Attachments type={req.type} id={req.id} attachments={req.attachments} canAdd={cap.canEdit || canApprove} />
+          <Attachments
+            type={req.type}
+            id={req.id}
+            attachments={req.attachments}
+            canUpload={cap.canUploadAttachment}
+            canDelete={cap.canDeleteAttachment}
+          />
         </div>
 
         {/* Sidebar actions */}
@@ -87,10 +90,10 @@ export default function RequestDetailPage() {
           <Card>
             <CardHeader title="Thao tác" icon={<MessageSquare className="h-4 w-4" />} />
             <CardBody className="space-y-2">
-              {canApprove && (req.status === 2 || req.status === 8) && (
+              {(cap.canApprove || cap.canReject) && (req.status === 2 || req.status === 8) && (
                 <>
-                  <Button className="w-full" variant="success" icon={<CheckCircle2 className="h-4 w-4" />} onClick={() => setActionModal({ kind: 'approve' })}>Duyệt đơn</Button>
-                  <Button className="w-full" variant="danger" icon={<XCircle className="h-4 w-4" />} onClick={() => setActionModal({ kind: 'reject' })}>Từ chối</Button>
+                  {cap.canApprove && <Button className="w-full" variant="success" icon={<CheckCircle2 className="h-4 w-4" />} onClick={() => setActionModal({ kind: 'approve' })}>Duyệt đơn</Button>}
+                  {cap.canReject && <Button className="w-full" variant="danger" icon={<XCircle className="h-4 w-4" />} onClick={() => setActionModal({ kind: 'reject' })}>Từ chối</Button>}
                 </>
               )}
               {cap.canRespond && (
@@ -100,7 +103,7 @@ export default function RequestDetailPage() {
                 </>
               )}
               {cap.canCancel && <Button className="w-full" variant="secondary" icon={<Ban className="h-4 w-4" />} onClick={() => setActionModal({ kind: 'cancel' })}>Hủy đơn</Button>}
-              {!canApprove && !cap.canRespond && !cap.canCancel && <EmptyState icon={<MessageSquare className="h-6 w-6" />} title="Không có thao tác" description="Đơn ở trạng thái không cần xử lý." />}
+              {!cap.canApprove && !cap.canReject && !cap.canRespond && !cap.canCancel && <EmptyState icon={<MessageSquare className="h-6 w-6" />} title="Không có thao tác" description="Đơn ở trạng thái không cần xử lý." />}
             </CardBody>
           </Card>
 

@@ -22,6 +22,8 @@ import { configRouter } from './routes/config.js'
 import { auditRouter } from './routes/audit.js'
 import { delegationRouter } from './routes/delegation.js'
 import { chatbotRouter } from './routes/chatbot.js'
+import { ensureDefaultRolePermissions } from './services/permissionService.js'
+import { runMigrations } from './services/migrationService.js'
 
 const app = express()
 const PORT = Number(process.env.PORT) || 4000
@@ -62,6 +64,8 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
 })
 
 initSchema()
+runMigrations(db)
+ensureDefaultRolePermissions()
 // Seed tự động nếu DB trống (lần khởi động đầu)
 if ((db.prepare('SELECT COUNT(*) c FROM employees').get() as any).c === 0) {
   console.log('  ℹ️  DB trống — tự động seed dữ liệu mẫu...')

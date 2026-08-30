@@ -2,7 +2,7 @@
 // API — Cấu hình & quy định (§11) + Role/permission (§11.3) + Profile (§9) — HTTP.
 // ============================================================================
 import { api } from './http'
-import type { AttendanceRegulation, LeaveType, User, Employee, RoleCode, PermissionFlag } from '@/types'
+import type { AttendanceRegulation, LeaveType, User, Employee, RoleCode, PermissionMatrixSnapshot } from '@/types'
 
 export const regulationsApi = {
   attendance(): Promise<AttendanceRegulation> { return api.get('/config/regulations/attendance') },
@@ -16,12 +16,15 @@ export const regulationsApi = {
 }
 
 export const rolesApi = {
-  matrix(): Promise<{ feature: string; perms: { role: RoleCode; flags: PermissionFlag[] }[] }[]> {
+  matrix(): Promise<PermissionMatrixSnapshot> {
     return api.get('/config/roles/matrix')
   },
+  updateMatrix(expectedVersion: number, permissions: PermissionMatrixSnapshot['permissions']): Promise<PermissionMatrixSnapshot> {
+    return api.put('/config/roles/matrix', { expectedVersion, permissions })
+  },
   users(): Promise<User[]> { return api.get('/config/roles/users') },
-  updateUserRoles(userId: string, roles: RoleCode[]): Promise<User> {
-    return api.put(`/config/roles/users/${userId}`, roles)
+  updateUserAuthorization(userId: string, payload: Pick<User, 'roles' | 'isActive' | 'departmentScopes' | 'authorizationVersion'>): Promise<User> {
+    return api.put(`/config/roles/users/${userId}`, { ...payload, expectedVersion: payload.authorizationVersion })
   },
   createUser(payload: { email: string; employeeId: string; roles: RoleCode[] }): Promise<User> {
     return api.post('/config/roles/users', payload)

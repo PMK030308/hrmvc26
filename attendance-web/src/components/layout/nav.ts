@@ -6,7 +6,11 @@ import {
   Settings, ShieldCheck, ScrollText, Radio, ListChecks, BadgeDollarSign, UserCheck,
 } from 'lucide-react'
 
-export interface NavItem { label: string; to: string; icon: any; roles?: RoleCode[]; badgeKey?: string }
+export interface NavItem { label: string; to: string; icon: any; roles?: RoleCode[]; permission?: string; badgeKey?: string }
+
+export const authorizationNavItem: NavItem = {
+  label: 'Role/Quyền', to: '/admin/roles', icon: ShieldCheck, permission: 'config.permission.manage',
+}
 
 export const employeeNav: NavItem[] = [
   { label: 'Trang chủ', to: '/employee', icon: LayoutDashboard },
@@ -36,7 +40,7 @@ export const adminNav: NavItem[] = [
   { label: 'Lương', to: '/admin/payroll', icon: BadgeDollarSign },
   { label: 'Báo cáo', to: '/admin/reports', icon: BarChart3 },
   { label: 'Quy định', to: '/admin/regulations/attendance', icon: Settings },
-  { label: 'Role/Quyền', to: '/admin/roles', icon: ShieldCheck, roles: ['Admin'] },
+  authorizationNavItem,
   { label: 'Audit log', to: '/admin/audit', icon: ScrollText, roles: ['Admin'] },
 ]
 

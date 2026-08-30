@@ -16,7 +16,8 @@ interface AuthState {
   logout: () => Promise<void>
   bootstrap: () => Promise<void>
   hasRole: (role: RoleCode) => boolean
-  hasPermission: (perm: PermissionFlag) => boolean
+  hasPermission: (perm: PermissionFlag | string) => boolean
+  refreshCapabilities: () => Promise<void>
   setUser: (u: User | null) => void
 }
 
@@ -57,6 +58,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
 
+  async refreshCapabilities() {
+    try {
+      const user = await authApi.me()
+      set({ user })
+    } catch (error) {
+      localStorage.removeItem(TOKEN_KEY)
+      set({ user: null, token: null })
+      throw error
+    }
+  },
+
   hasRole(role) {
     const u = get().user
     return !!u && u.roles.includes(role)
@@ -65,8 +77,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   hasPermission(perm) {
     const u = get().user
     if (!u) return false
-    if (u.roles.includes('Admin')) return true
-    return u.permissions.includes(perm)
+    return u.effectivePermissions?.includes(perm) ?? false
   },
 
   setUser(u) { set({ user: u }) },

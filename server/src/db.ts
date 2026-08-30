@@ -8,8 +8,9 @@ import { mkdirSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 
 const DB_PATH = resolve(process.cwd(), 'server/data/hrm.db')
-// Cho phép chạy từ trong thư mục server hoặc từ project root
-const finalPath = process.cwd().endsWith('server') ? resolve('data/hrm.db') : DB_PATH
+// Cho phép chạy từ trong thư mục server hoặc từ project root; test có thể trỏ sang DB tạm biệt lập.
+const defaultPath = process.cwd().endsWith('server') ? resolve('data/hrm.db') : DB_PATH
+const finalPath = process.env.HRM_DB_PATH ? resolve(process.env.HRM_DB_PATH) : defaultPath
 mkdirSync(dirname(finalPath), { recursive: true })
 
 export const db = new Database(finalPath)
@@ -81,6 +82,17 @@ export function initSchema(): void {
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (employee_id) REFERENCES employees(id)
   );
+
+  CREATE TABLE IF NOT EXISTS role_feature_permissions (
+    role TEXT NOT NULL,
+    feature TEXT NOT NULL,
+    action TEXT NOT NULL,
+    allowed INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL,
+    updated_by TEXT,
+    PRIMARY KEY (role, feature, action)
+  );
+  CREATE INDEX IF NOT EXISTS idx_role_feature_permissions_role ON role_feature_permissions(role);
 
   CREATE TABLE IF NOT EXISTS shifts (
     id TEXT PRIMARY KEY,

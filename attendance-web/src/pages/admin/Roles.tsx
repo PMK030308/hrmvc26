@@ -1,33 +1,57 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ShieldCheck, Plus, Pencil, Check } from 'lucide-react'
 import { toast } from 'sonner'
 import { rolesApi } from '@/api/config'
 import { orgApi } from '@/api/org'
-import { ROLE_LABEL, PERMISSION_LABEL } from '@/constants/enums'
+import { ROLE_LABEL } from '@/constants/enums'
+import { togglePermission } from '@/lib/requestPermissionMatrix'
+import { useAuthStore } from '@/stores/authStore'
 import { PageHeader, Card, CardHeader, Spinner, EmptyState, Button, Modal, Badge, Input, Select, Table, Tr, Td } from '@/components/ui'
-import type { RoleCode, User } from '@/types'
+import type { PermissionMatrixEntry, RoleCode, User } from '@/types'
 
 const ALL_ROLES: RoleCode[] = ['Employee', 'Manager', 'Accountant', 'HR', 'Director', 'Admin']
+const MATRIX_ROLES: RoleCode[] = ['Guest', ...ALL_ROLES]
 
 export default function AdminRoles() {
   const qc = useQueryClient()
+  const refreshCapabilities = useAuthStore((state) => state.refreshCapabilities)
   const { data: matrix, isLoading } = useQuery({ queryKey: ['roles', 'matrix'], queryFn: () => rolesApi.matrix() })
   const { data: users } = useQuery({ queryKey: ['roles', 'users'], queryFn: () => rolesApi.users() })
   const { data: emps } = useQuery({ queryKey: ['org', 'employees', 'all'], queryFn: () => orgApi.employees() })
   const [edit, setEdit] = useState<User | null>(null)
   const [creating, setCreating] = useState(false)
+  const [matrixVersion, setMatrixVersion] = useState(0)
+  const [matrixDraft, setMatrixDraft] = useState<PermissionMatrixEntry[]>([])
+
+  useEffect(() => {
+    if (matrix) {
+      setMatrixVersion(matrix.version)
+      setMatrixDraft(matrix.permissions.map((row) => ({ ...row, roles: { ...row.roles } })))
+    }
+  }, [matrix])
 
   const empName = (id: string) => emps?.find((e) => e.id === id)?.fullName ?? id
 
   const update = useMutation({
-    mutationFn: ({ id, roles }: { id: string; roles: RoleCode[] }) => rolesApi.updateUserRoles(id, roles),
-    onSuccess: () => { toast.success('Đã cập nhật vai trò'); setEdit(null); qc.invalidateQueries({ queryKey: ['roles', 'users'] }) },
+    mutationFn: ({ id, user }: { id: string; user: User }) => rolesApi.updateUserAuthorization(id, user),
+    onSuccess: async () => { toast.success('Đã cập nhật tài khoản'); setEdit(null); await qc.invalidateQueries({ queryKey: ['roles', 'users'] }); await refreshCapabilities() },
     onError: (e: Error) => toast.error(e.message),
   })
   const create = useMutation({
     mutationFn: (p: { email: string; employeeId: string; roles: RoleCode[] }) => rolesApi.createUser(p),
     onSuccess: () => { toast.success('Đã tạo tài khoản'); setCreating(false); qc.invalidateQueries({ queryKey: ['roles', 'users'] }) },
+    onError: (e: Error) => toast.error(e.message),
+  })
+  const saveMatrix = useMutation({
+    mutationFn: () => rolesApi.updateMatrix(matrixVersion, matrixDraft),
+    onSuccess: async (saved) => {
+      setMatrixVersion(saved.version)
+      setMatrixDraft(saved.permissions.map((row) => ({ ...row, roles: { ...row.roles } })))
+      toast.success('Đã cập nhật ma trận phân quyền')
+      await qc.invalidateQueries({ queryKey: ['roles', 'matrix'] })
+      await refreshCapabilities()
+    },
     onError: (e: Error) => toast.error(e.message),
   })
 
@@ -38,27 +62,41 @@ export default function AdminRoles() {
       } />
 
       <Card className="mb-5">
-        <CardHeader title="Ma trận phân quyền" subtitle="Quyền theo tính năng & vai trò" icon={<ShieldCheck className="h-4 w-4" />} />
+        <CardHeader
+          title={`Ma trận phân quyền · phiên bản ${matrixVersion || '—'}`}
+          subtitle="Backend quyết định quyền. Các quyền chưa được thực thi ở phase hiện tại chỉ hiển thị và không thể chỉnh sửa."
+          icon={<ShieldCheck className="h-4 w-4" />}
+          action={<Button size="sm" loading={saveMatrix.isPending} disabled={matrixDraft.length === 0} icon={<Check className="h-3.5 w-3.5" />} onClick={() => saveMatrix.mutate()}>Lưu ma trận</Button>}
+        />
         {isLoading ? <div className="p-5"><Spinner /></div> : (
           <div className="overflow-x-auto">
             <table className="w-full border-collapse text-sm">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50/50 text-left">
-                  <th className="px-4 py-3 text-xs font-semibold uppercase text-slate-500">Tính năng</th>
-                  {ALL_ROLES.map((r) => <th key={r} className="px-3 py-3 text-center text-xs font-semibold uppercase text-slate-500">{ROLE_LABEL[r].label}</th>)}
+                  <th className="min-w-64 px-4 py-3 text-xs font-semibold uppercase text-slate-500">Quyền</th>
+                  {MATRIX_ROLES.map((role) => <th key={role} className="min-w-24 px-3 py-3 text-center text-xs font-semibold uppercase text-slate-500">{ROLE_LABEL[role].label}</th>)}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {(matrix ?? []).map((f) => (
-                  <tr key={f.feature} className="hover:bg-slate-50">
-                    <td className="px-4 py-3 font-mono text-xs text-slate-700">{f.feature}</td>
-                    {ALL_ROLES.map((r) => {
-                      const perms = f.perms.find((p) => p.role === r)?.flags ?? []
-                      return <td key={r} className="px-3 py-3 text-center">
-                        {perms.length === 0 ? <span className="text-slate-300">—</span> :
-                          <span className="inline-flex flex-wrap justify-center gap-1">{perms.map((p) => <span key={p} className="inline-flex items-center gap-0.5 rounded bg-brand-50 px-1.5 py-0.5 text-[10px] font-medium text-brand-700"><Check className="h-2.5 w-2.5" />{PERMISSION_LABEL[p]}</span>)}</span>}
+                {matrixDraft.map((row) => (
+                  <tr key={row.key} className={row.enforced ? 'hover:bg-slate-50' : 'bg-slate-50/60 opacity-65'}>
+                    <td className="px-4 py-3">
+                      <p className="font-medium text-slate-700">{row.label}</p>
+                      <p className="mt-0.5 font-mono text-[11px] text-slate-400">{row.module} · {row.key}</p>
+                      {!row.enforced && <span className="mt-1 inline-block rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">Chưa thực thi</span>}
+                    </td>
+                    {MATRIX_ROLES.map((role) => (
+                      <td key={role} className="px-3 py-3 text-center">
+                        <input
+                          type="checkbox"
+                          aria-label={`${row.label} - ${ROLE_LABEL[role].label}`}
+                          checked={row.roles[role]}
+                          disabled={!row.enforced}
+                          onChange={() => setMatrixDraft((current) => togglePermission(current, row.key, role))}
+                          className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                        />
                       </td>
-                    })}
+                    ))}
                   </tr>
                 ))}
               </tbody>
@@ -70,11 +108,12 @@ export default function AdminRoles() {
       <Card>
         <CardHeader title={`Tài khoản (${users?.length ?? 0})`} icon={<ShieldCheck className="h-4 w-4" />} />
         {(users ?? []).length === 0 ? <EmptyState icon={<ShieldCheck className="h-6 w-6" />} title="Không có tài khoản" /> : (
-          <Table headers={['Tài khoản', 'Nhân viên', 'Vai trò', 'Thao tác']}>
+          <Table headers={['Tài khoản', 'Nhân viên', 'Trạng thái', 'Vai trò', 'Thao tác']}>
             {users!.map((u) => (
               <Tr key={u.id}>
                 <Td className="font-medium text-slate-800">{u.email}</Td>
                 <Td>{empName(u.employeeId)}</Td>
+                <Td><Badge tone={u.isActive ? 'success' : 'neutral'}>{u.isActive ? 'Hoạt động' : 'Vô hiệu hóa'}</Badge></Td>
                 <Td><div className="flex flex-wrap gap-1">{u.roles.map((r) => <Badge key={r} tone={ROLE_LABEL[r].tone as any}>{ROLE_LABEL[r].label}</Badge>)}</div></Td>
                 <Td><Button size="sm" variant="secondary" icon={<Pencil className="h-3.5 w-3.5" />} onClick={() => setEdit(u)}>Sửa vai trò</Button></Td>
               </Tr>
@@ -84,8 +123,14 @@ export default function AdminRoles() {
       </Card>
 
       <Modal open={!!edit} onClose={() => setEdit(null)} size="sm" title="Chỉnh vai trò"
-        footer={<><Button variant="secondary" onClick={() => setEdit(null)}>Hủy</Button><Button loading={update.isPending} onClick={() => edit && update.mutate({ id: edit.id, roles: edit.roles })}>Lưu</Button></>}>
-        {edit && <RolePicker roles={edit.roles} onChange={(roles) => setEdit({ ...edit, roles })} />}
+        footer={<><Button variant="secondary" onClick={() => setEdit(null)}>Hủy</Button><Button loading={update.isPending} onClick={() => edit && update.mutate({ id: edit.id, user: edit })}>Lưu</Button></>}>
+        {edit && <div className="space-y-4">
+          <label className="flex items-center gap-3 rounded-lg border border-slate-200 px-3 py-2.5 text-sm">
+            <input type="checkbox" checked={edit.isActive} onChange={(event) => setEdit({ ...edit, isActive: event.target.checked })} />
+            Tài khoản đang hoạt động
+          </label>
+          <RolePicker roles={edit.roles} onChange={(roles) => setEdit({ ...edit, roles })} />
+        </div>}
       </Modal>
 
       <CreateUserModal open={creating} onClose={() => setCreating(false)} employees={emps ?? []} loading={create.isPending} onCreate={(p) => create.mutate(p)} />

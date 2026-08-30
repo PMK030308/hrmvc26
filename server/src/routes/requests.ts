@@ -1,7 +1,7 @@
 // Requests + Approvals routes (§14.5 / §14.6)
 import { Router } from 'express'
 import { db } from '../db.js'
-import { requireAuth, type AuthedRequest } from '../middleware/auth.js'
+import { requireAuth, requirePermission, type AuthedRequest } from '../middleware/auth.js'
 import {
   getEmployee, allShifts, mapShift, getSchedule, getShift, mapRequest, getRequest, allRequests, mapAttachment, uid,
 } from '../repo.js'
@@ -13,19 +13,26 @@ import {
 } from '../engines/request.js'
 import { isoNow, ymd, nowVn } from '../lib/date.js'
 import { getRegulation } from '../repo.js'
+import { REQUEST_PERMISSIONS, canManageRequestAttachment, canViewRequest } from '../authz/requestAuthorization.js'
+import { assertAuthorizedAction, loadRequestActor, loadRequestAuthorizationContext, requireViewableRequest } from '../authz/requestAuthorizationContext.js'
 
 const VALID_TYPES = ['leaves', 'late-earlies', 'overtimes', 'business-trips', 'shift-swaps', 'attendance-updates']
 
 export const requestsRouter = Router()
 
 requestsRouter.get('/mine', requireAuth, (req: AuthedRequest, res) => {
+  const actor = loadRequestActor(req.user!.id)
   const mine = (db.prepare('SELECT * FROM requests WHERE employee_id=?').all(req.user!.employeeId) as any[])
-    .sort((a, b) => b.created_at.localeCompare(a.created_at)).map((r) => { const q = mapRequest(r); computeCapabilities(q, req.user!.id); return q })
-  const pend = pendingApprovals(req.user!.id).map((r) => { computeCapabilities(r, req.user!.id); return r })
+    .filter((r) => {
+      const context = loadRequestAuthorizationContext(r.type, r.id)
+      return !!context && canViewRequest(actor, context)
+    })
+    .sort((a, b) => b.created_at.localeCompare(a.created_at)).map((r) => { const q = mapRequest(r); computeCapabilities(q, actor.userId); return q })
+  const pend = pendingApprovals(actor.userId).map((r) => { computeCapabilities(r, actor.userId); return r })
   res.json({ mine, pending: pend })
 })
 
-requestsRouter.get('/catalog', requireAuth, (req: AuthedRequest, res) => {
+requestsRouter.get('/catalog', requireAuth, requirePermission(REQUEST_PERMISSIONS.CREATE_OWN), (req: AuthedRequest, res) => {
   const emp = getEmployee(req.user!.employeeId)!
   const swapPartners = (db.prepare('SELECT * FROM employees WHERE department_id=? AND id!=? AND status=2').all(emp.departmentId, emp.id) as any[])
     .map((e) => ({ id: e.id, name: e.full_name, code: e.employee_code }))
@@ -45,7 +52,7 @@ requestsRouter.get('/catalog', requireAuth, (req: AuthedRequest, res) => {
 })
 
 // Tiến độ OT của NV hiện tại theo tháng/năm của `date` (cho form tạo đơn OT hiển thị cap).
-requestsRouter.get('/ot-usage', requireAuth, (req: AuthedRequest, res) => {
+requestsRouter.get('/ot-usage', requireAuth, requirePermission(REQUEST_PERMISSIONS.CREATE_OWN), (req: AuthedRequest, res) => {
   const date = String(req.query.date ?? ymd(nowVn()))
   const reg = getRegulation()
   const { monthUsed, yearUsed } = otUsedHours(req.user!.employeeId, date)
@@ -59,28 +66,25 @@ requestsRouter.get('/ot-usage', requireAuth, (req: AuthedRequest, res) => {
 requestsRouter.get('/:type', requireAuth, (req: AuthedRequest, res, next) => {
   const type = req.params.type
   if (!VALID_TYPES.includes(type)) return next(httpError(404, 'Không tìm thấy loại đơn.'))
-  const user = req.user!
-  const isAdmin = user.roles.some((r) => r === 'Admin' || r === 'HR' || r === 'Director')
-  const isManager = user.roles.includes('Manager')
+  const actor = loadRequestActor(req.user!.id)
   const rows = (db.prepare('SELECT * FROM requests WHERE type=?').all(type) as any[]).filter((r) => {
-    if (isAdmin) return true
-    if (isManager) {
-      const emp = getEmployee(r.employee_id)
-      return user.departmentScopes.includes(emp?.departmentId ?? '') || r.employee_id === user.employeeId
-    }
-    return r.employee_id === user.employeeId
-  }).sort((a, b) => b.created_at.localeCompare(a.created_at)).map((r) => { const q = mapRequest(r); computeCapabilities(q, user.id); return q })
+    const context = loadRequestAuthorizationContext(type, r.id)
+    return !!context && canViewRequest(actor, context)
+  }).sort((a, b) => b.created_at.localeCompare(a.created_at)).map((r) => { const q = mapRequest(r); computeCapabilities(q, actor.userId); return q })
   res.json(rows)
 })
 
-requestsRouter.get('/:type/:id', requireAuth, (req, res, next) => {
-  const q = getRequest(req.params.type, req.params.id)
-  if (!q) return next(httpError(404, 'Không tìm thấy đơn.'))
-  computeCapabilities(q, (req as AuthedRequest).user!.id)
-  res.json(q)
+requestsRouter.get('/:type/:id', requireAuth, (req: AuthedRequest, res, next) => {
+  try {
+    const actor = loadRequestActor(req.user!.id)
+    requireViewableRequest(actor, req.params.type, req.params.id)
+    const q = getRequest(req.params.type, req.params.id)!
+    computeCapabilities(q, actor.userId)
+    res.json(q)
+  } catch (e) { next(e) }
 })
 
-requestsRouter.post('/:type', requireAuth, (req: AuthedRequest, res, next) => {
+requestsRouter.post('/:type', requireAuth, requirePermission(REQUEST_PERMISSIONS.CREATE_OWN), (req: AuthedRequest, res, next) => {
   try {
     const type = req.params.type
     if (!VALID_TYPES.includes(type)) return next(httpError(404, 'Không tìm thấy loại đơn.'))
@@ -94,42 +98,68 @@ requestsRouter.post('/:type', requireAuth, (req: AuthedRequest, res, next) => {
 requestsRouter.put('/:type/:id', requireAuth, (req: AuthedRequest, res, next) => {
   try {
     const q = updateRequest(req.user!.id, req.params.type as any, req.params.id, req.body, Number(req.body?.expectedVersion ?? req.body?.requestVersion))
-    pushAudit(req.user!.id, req.user!.email, 2, 'Request', req.params.id, `Sửa đơn ${req.params.type}`)
     res.json(q)
   } catch (e) { next(e) }
 })
 
 requestsRouter.post('/:type/:id/cancel', requireAuth, (req: AuthedRequest, res, next) => {
   try {
-    const q = cancelRequest(req.params.type as any, req.params.id, Number(req.body?.expectedVersion ?? req.body?.requestVersion))
-    pushAudit(req.user!.id, req.user!.email, 3, 'Request', req.params.id, `Hủy đơn ${req.params.type}`)
+    const q = cancelRequest(req.user!.id, req.params.type as any, req.params.id, Number(req.body?.expectedVersion ?? req.body?.requestVersion))
     res.json(q)
   } catch (e) { next(e) }
 })
 
-requestsRouter.get('/:type/:id/timeline', requireAuth, (req, res, next) => {
-  const q = getRequest(req.params.type, req.params.id)
-  if (!q) return next(httpError(404, 'Không tìm thấy đơn.'))
-  res.json(q.approvals)
+requestsRouter.get('/:type/:id/timeline', requireAuth, (req: AuthedRequest, res, next) => {
+  try {
+    const actor = loadRequestActor(req.user!.id)
+    requireViewableRequest(actor, req.params.type, req.params.id)
+    res.json(getRequest(req.params.type, req.params.id)!.approvals)
+  } catch (e) { next(e) }
 })
 
-requestsRouter.get('/:type/:id/attachments', requireAuth, (req, res) => {
-  res.json((db.prepare('SELECT * FROM request_attachments WHERE request_id=?').all(req.params.id) as any[]).map(mapAttachment))
+requestsRouter.get('/:type/:id/attachments', requireAuth, (req: AuthedRequest, res, next) => {
+  try {
+    const actor = loadRequestActor(req.user!.id)
+    const context = requireViewableRequest(actor, req.params.type, req.params.id)
+    if (!canManageRequestAttachment(actor, context, 'read')) throw httpError(403, 'Bạn không có quyền đọc file đính kèm.')
+    res.json((db.prepare('SELECT * FROM request_attachments WHERE request_id=?').all(req.params.id) as any[]).map(mapAttachment))
+  } catch (e) { next(e) }
 })
 
-requestsRouter.post('/:type/:id/attachments', requireAuth, (req: AuthedRequest, res) => {
-  const f = req.body ?? {}
-  const id = uid('att')
-  db.prepare(`INSERT INTO request_attachments (id, request_id, file_name, file_size, mime_type, data_url, uploaded_at) VALUES (?,?,?,?,?,?,?)`)
-    .run(id, req.params.id, f.fileName, f.fileSize, f.mimeType, f.dataUrl, isoNow())
-  pushAudit(req.user!.id, req.user!.email, 1, 'Attachment', id, `Đính kèm ${f.fileName} vào đơn ${req.params.id}`)
-  res.json(mapAttachment(db.prepare('SELECT * FROM request_attachments WHERE id=?').get(id) as any))
+requestsRouter.post('/:type/:id/attachments', requireAuth, (req: AuthedRequest, res, next) => {
+  try {
+    const attachment = db.transaction(() => {
+      const actor = loadRequestActor(req.user!.id)
+      const context = loadRequestAuthorizationContext(req.params.type, req.params.id)
+      if (!context) throw httpError(404, 'Không tìm thấy đơn.')
+      assertAuthorizedAction(actor, context, canManageRequestAttachment(actor, context, 'upload'))
+      const file = req.body ?? {}
+      const attachmentId = uid('att')
+      db.prepare(`INSERT INTO request_attachments (id, request_id, file_name, file_size, mime_type, data_url, uploaded_at) VALUES (?,?,?,?,?,?,?)`)
+        .run(attachmentId, req.params.id, file.fileName, file.fileSize, file.mimeType, file.dataUrl, isoNow())
+      pushAudit(req.user!.id, req.user!.email, 1, 'Attachment', attachmentId, `Đính kèm ${file.fileName} vào đơn ${req.params.id}`)
+      return mapAttachment(db.prepare('SELECT * FROM request_attachments WHERE id=?').get(attachmentId) as any)
+    })()
+    res.json(attachment)
+  } catch (e) { next(e) }
 })
 
-requestsRouter.delete('/attachments/:attachmentId', requireAuth, (req: AuthedRequest, res) => {
-  db.prepare('DELETE FROM request_attachments WHERE id=?').run(req.params.attachmentId)
-  pushAudit(req.user!.id, req.user!.email, 3, 'Attachment', req.params.attachmentId, `Xóa đính kèm ${req.params.attachmentId}`)
-  res.json({ ok: true })
+requestsRouter.delete('/attachments/:attachmentId', requireAuth, (req: AuthedRequest, res, next) => {
+  try {
+    db.transaction(() => {
+      const attachment = db.prepare(`SELECT a.*, r.type FROM request_attachments a
+        JOIN requests r ON r.id=a.request_id WHERE a.id=?`).get(req.params.attachmentId) as any
+      if (!attachment) throw httpError(404, 'Không tìm thấy file đính kèm.')
+      const actor = loadRequestActor(req.user!.id)
+      const context = loadRequestAuthorizationContext(attachment.type, attachment.request_id)
+      if (!context) throw httpError(404, 'Không tìm thấy file đính kèm.')
+      assertAuthorizedAction(actor, context, canManageRequestAttachment(actor, context, 'delete'))
+      const deleted = db.prepare('DELETE FROM request_attachments WHERE id=?').run(req.params.attachmentId)
+      if (deleted.changes !== 1) throw httpError(404, 'Không tìm thấy file đính kèm.')
+      pushAudit(req.user!.id, req.user!.email, 3, 'Attachment', req.params.attachmentId, `Xóa đính kèm ${req.params.attachmentId}`)
+    })()
+    res.json({ ok: true })
+  } catch (e) { next(e) }
 })
 
 requestsRouter.get('/my-shift/:date', requireAuth, (req: AuthedRequest, res) => {
@@ -147,7 +177,6 @@ requestsRouter.post('/shift-swaps/:id/partner-response', requireAuth, (req: Auth
   try {
     const { accepted, rejectionReason, expectedVersion } = req.body ?? {}
     const q = partnerRespond(req.user!.id, req.params.id, !!accepted, rejectionReason ?? null, Number(expectedVersion))
-    pushAudit(req.user!.id, req.user!.email, 2, 'ShiftSwap', req.params.id, accepted ? 'Đồng ý đổi ca' : 'Từ chối đổi ca')
     res.json(q)
   } catch (e) { next(e) }
 })
@@ -163,7 +192,6 @@ approvalsRouter.post('/:type/:id/approve', requireAuth, (req: AuthedRequest, res
   try {
     const { comment, expectedVersion } = req.body ?? {}
     const q = approveRequest(req.user!.id, req.params.type as any, req.params.id, comment ?? '', Number(expectedVersion))
-    pushAudit(req.user!.id, req.user!.email, 2, 'Request', req.params.id, `Duyệt đơn ${req.params.type} (cấp ${q.currentLevel})`)
     res.json(q)
   } catch (e) { next(e) }
 })
@@ -172,7 +200,6 @@ approvalsRouter.post('/:type/:id/reject', requireAuth, (req: AuthedRequest, res,
   try {
     const { comment, expectedVersion } = req.body ?? {}
     const q = rejectRequest(req.user!.id, req.params.type as any, req.params.id, comment ?? '', Number(expectedVersion))
-    pushAudit(req.user!.id, req.user!.email, 2, 'Request', req.params.id, `Từ chối đơn ${req.params.type}: ${comment}`)
     res.json(q)
   } catch (e) { next(e) }
 })

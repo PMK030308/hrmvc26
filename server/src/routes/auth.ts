@@ -7,6 +7,8 @@ import { getUserByEmail, mapUser, getUserById } from '../repo.js'
 import { httpError } from '../types.js'
 import { pushAudit } from '../helpers.js'
 import { validatePasswordChange } from '../lib/profile.js'
+import { loadAuthorizationActor } from '../authz/authorizationActor.js'
+import { getPermissionMatrixSnapshot } from '../services/permissionService.js'
 
 export const authRouter = Router()
 
@@ -17,7 +19,13 @@ authRouter.post('/login', (req, res, next) => {
     if (!row || !bcrypt.compareSync(password ?? '', row.password_hash)) {
       throw httpError(401, 'Email hoặc mật khẩu không đúng.')
     }
-    const user = mapUser(row)
+    const actor = loadAuthorizationActor(row.id)
+    const user = {
+      ...mapUser(row),
+      effectivePermissions: [...actor.permissions],
+      effectiveDepartmentScopes: actor.departmentScopes,
+      permissionMatrixVersion: getPermissionMatrixSnapshot().version,
+    }
     const token = signToken(user)
     pushAudit(user.id, user.email, 4, 'session', null, 'Đăng nhập hệ thống')
     res.json({ token, user })
@@ -34,7 +42,13 @@ authRouter.get('/me', requireAuth, (req: AuthedRequest, res, next) => {
   try {
     const u = getUserById(req.user!.id)
     if (!u) throw httpError(401, 'Phiên hết hạn.')
-    res.json(u)
+    const actor = req.authorizationActor ?? loadAuthorizationActor(req.user!.id)
+    res.json({
+      ...u,
+      effectivePermissions: [...actor.permissions],
+      effectiveDepartmentScopes: actor.departmentScopes,
+      permissionMatrixVersion: getPermissionMatrixSnapshot().version,
+    })
   } catch (e) { next(e) }
 })
 

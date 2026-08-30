@@ -69,7 +69,13 @@ export function RequestTimeline({ type, id, approvals }: { type: RequestType; id
 }
 
 /** Đính kèm — upload (base64) + xóa. */
-export function Attachments({ type, id, attachments, canAdd }: { type: RequestType; id: string; attachments: RequestAttachment[]; canAdd: boolean }) {
+export function Attachments({ type, id, attachments, canUpload, canDelete }: {
+  type: RequestType
+  id: string
+  attachments: RequestAttachment[]
+  canUpload: boolean
+  canDelete: boolean
+}) {
   const qc = useQueryClient()
   const list = useQuery({
     queryKey: ['request', type, id, 'attachments'],
@@ -95,7 +101,7 @@ export function Attachments({ type, id, attachments, canAdd }: { type: RequestTy
   return (
     <Card>
       <CardHeader title="Tệp đính kèm" icon={<Paperclip className="h-4 w-4" />} action={
-        canAdd && (
+        canUpload && (
           <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-200">
             <Upload className="h-3.5 w-3.5" /> Tải lên
             <input type="file" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) upload.mutate(f); e.target.value = '' }} />
@@ -103,7 +109,7 @@ export function Attachments({ type, id, attachments, canAdd }: { type: RequestTy
         )
       } />
       {list.data.length === 0 ? (
-        <CardBody><EmptyState icon={<FileText className="h-6 w-6" />} title="Chưa có tệp đính kèm" description={canAdd ? 'Tải lên minh chứng (ảnh, PDF).' : undefined} /></CardBody>
+        <CardBody><EmptyState icon={<FileText className="h-6 w-6" />} title="Chưa có tệp đính kèm" description={canUpload ? 'Tải lên minh chứng (ảnh, PDF).' : undefined} /></CardBody>
       ) : (
         <ul className="divide-y divide-slate-100">
           {list.data.map((a) => (
@@ -114,7 +120,7 @@ export function Attachments({ type, id, attachments, canAdd }: { type: RequestTy
                 <p className="text-xs text-slate-400">{fmtBytes(a.fileSize)} · {fmtDate(a.uploadedAt)}</p>
               </div>
               {a.mimeType.startsWith('image/') && <img src={a.dataUrl} alt={a.fileName} className="h-10 w-10 rounded-lg object-cover ring-1 ring-slate-200" />}
-              {canAdd && (
+              {canDelete && (
                 <button onClick={() => del.mutate(a.id)} className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-danger-50 hover:text-danger-600">
                   {del.isPending ? <Spinner className="h-4 w-4" /> : <Trash2 className="h-4 w-4" />}
                 </button>
