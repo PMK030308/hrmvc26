@@ -35,6 +35,8 @@ test('phase 8 migration adds nullable storage metadata without changing legacy p
     assert.equal(columns.has('storage_provider'), true)
     assert.equal(columns.has('storage_key'), true)
     assert.equal(columns.has('storage_migrated_at'), true)
+    assert.equal((database.prepare(`SELECT COUNT(*) count FROM sqlite_master
+      WHERE type='table' AND name='attachment_storage_cleanup'`).get() as any).count, 1)
     const row = database.prepare(`SELECT data_url, storage_provider, storage_key, storage_migrated_at
       FROM request_attachments WHERE id='legacy-1'`).get() as any
     assert.deepEqual(row, {
