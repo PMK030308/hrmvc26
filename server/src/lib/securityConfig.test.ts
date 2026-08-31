@@ -27,3 +27,12 @@ test('JWT runtime resolution is independent from startup-only CORS validation', 
     JWT_SECRET: 'phase-7-production-test-secret-at-least-32-chars',
   }), 'phase-7-production-test-secret-at-least-32-chars')
 })
+
+test('production only accepts exact HTTPS origins and an explicitly supported proxy topology', () => {
+  const base = { NODE_ENV: 'production', JWT_SECRET: 'a'.repeat(48) }
+  assert.throws(() => resolveSecurityConfig({ ...base, CORS_ORIGINS: '*' }), /CORS_ORIGINS|origin/i)
+  assert.throws(() => resolveSecurityConfig({ ...base, CORS_ORIGINS: 'http://hr.example' }), /HTTPS/i)
+  assert.throws(() => resolveSecurityConfig({ ...base, CORS_ORIGINS: 'https://*.example.com' }), /origin/i)
+  assert.throws(() => resolveSecurityConfig({ ...base, CORS_ORIGINS: 'https://hr.example', TRUST_PROXY: 'true' }), /TRUST_PROXY/i)
+  assert.throws(() => resolveSecurityConfig({ ...base, CORS_ORIGINS: 'https://hr.example', TRUST_PROXY: '2' }), /TRUST_PROXY/i)
+})
