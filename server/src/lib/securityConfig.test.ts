@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { resolveSecurityConfig } from './securityConfig.js'
+import { resolveJwtSecret, resolveSecurityConfig } from './securityConfig.js'
 
 test('production rejects missing or default JWT secrets and an empty CORS allowlist', () => {
   assert.throws(() => resolveSecurityConfig({ NODE_ENV: 'production', JWT_SECRET: '', CORS_ORIGINS: 'https://hr.example' }), /JWT_SECRET/)
@@ -19,4 +19,11 @@ test('security config parses exact origins and trust proxy without making develo
   const development = resolveSecurityConfig({ NODE_ENV: 'development' })
   assert.equal(development.jwtSecret.length > 0, true)
   assert.equal(development.trustProxy, false)
+})
+
+test('JWT runtime resolution is independent from startup-only CORS validation', () => {
+  assert.equal(resolveJwtSecret({
+    NODE_ENV: 'production',
+    JWT_SECRET: 'phase-7-production-test-secret-at-least-32-chars',
+  }), 'phase-7-production-test-secret-at-least-32-chars')
 })

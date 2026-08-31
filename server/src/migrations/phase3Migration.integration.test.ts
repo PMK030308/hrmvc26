@@ -19,7 +19,7 @@ after(() => {
 
 test('phase 3 migration applies on a fresh initialized database', () => {
   initSchema()
-  assert.deepEqual(runMigrations(db).appliedVersions, [1, 2, 3])
+  assert.deepEqual(runMigrations(db, SCHEMA_MIGRATIONS.slice(0, 3)).appliedVersions, [1, 2, 3])
   const columns = new Set((db.prepare('PRAGMA table_info(punches)').all() as any[]).map((row) => row.name))
   assert.equal(columns.has('device_id'), true)
   assert.equal(columns.has('proxy_actor_user_id'), true)
@@ -53,13 +53,13 @@ test('phase 3 migration preserves legacy punch data while adding device and prox
         net REAL NOT NULL DEFAULT 0, components TEXT NOT NULL DEFAULT '[]'
       );
     `)
-    assert.deepEqual(runMigrations(legacy, SCHEMA_MIGRATIONS).appliedVersions, [1, 2, 3])
+    assert.deepEqual(runMigrations(legacy, SCHEMA_MIGRATIONS.slice(0, 3)).appliedVersions, [1, 2, 3])
     const punch = legacy.prepare(`SELECT id, employee_id, source, device_id, proxy_actor_user_id, proxy_reason
       FROM punches WHERE id='legacy-punch'`).get() as any
     assert.deepEqual(punch, {
       id: 'legacy-punch', employee_id: 'employee-1', source: 2,
       device_id: null, proxy_actor_user_id: null, proxy_reason: null,
     })
-    assert.deepEqual(runMigrations(legacy, SCHEMA_MIGRATIONS).appliedVersions, [])
+    assert.deepEqual(runMigrations(legacy, SCHEMA_MIGRATIONS.slice(0, 3)).appliedVersions, [])
   } finally { legacy.close() }
 })

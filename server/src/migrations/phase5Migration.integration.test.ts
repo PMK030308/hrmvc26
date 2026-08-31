@@ -28,7 +28,7 @@ test('phase 5 migration adds workflow metadata and unique payroll period employe
       INSERT INTO payslips (id, period, employee_id, employee_name)
       VALUES ('legacy-slip', '2026081', 'employee', 'Employee');
     `)
-    assert.deepEqual(runMigrations(database, SCHEMA_MIGRATIONS).appliedVersions, [1, 2, 3])
+    assert.deepEqual(runMigrations(database, SCHEMA_MIGRATIONS.slice(0, 3)).appliedVersions, [1, 2, 3])
     const summary = database.prepare(`SELECT version, confirmed_by, confirmed_at, transferred_by, transferred_at,
       approved_by, approved_at FROM summary_timesheets WHERE id='legacy-summary'`).get() as any
     assert.equal(summary.version, 1)

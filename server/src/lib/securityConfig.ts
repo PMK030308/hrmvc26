@@ -14,9 +14,13 @@ function parseTrustProxy(value: string | undefined): boolean | number | string {
   return normalized
 }
 
+export function resolveJwtSecret(env: NodeJS.ProcessEnv | Record<string, string | undefined>): string {
+  return env.JWT_SECRET?.trim() || DEVELOPMENT_JWT_SECRET
+}
+
 export function resolveSecurityConfig(env: NodeJS.ProcessEnv | Record<string, string | undefined>): SecurityConfig {
   const production = env.NODE_ENV === 'production'
-  const jwtSecret = env.JWT_SECRET?.trim() || DEVELOPMENT_JWT_SECRET
+  const jwtSecret = resolveJwtSecret(env)
   if (production && (jwtSecret === DEVELOPMENT_JWT_SECRET || jwtSecret.length < 32)) {
     throw new Error('JWT_SECRET phải được cấu hình bằng secret production dài ít nhất 32 ký tự.')
   }

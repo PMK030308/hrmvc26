@@ -84,13 +84,17 @@ function markerExists(): boolean {
 test('reset-demo stays disabled in production even with permission and confirmation', async () => {
   setPermission(true)
   const previous = process.env.NODE_ENV
+  const previousSecret = process.env.JWT_SECRET
   process.env.NODE_ENV = 'production'
+  process.env.JWT_SECRET = 'phase-7-production-test-secret-at-least-32-chars'
   try {
     const response = await reset('RESET_DEMO_DATA')
     assert.equal(response.status, 404)
     assert.equal(markerExists(), true)
   } finally {
     process.env.NODE_ENV = previous
+    if (previousSecret === undefined) delete process.env.JWT_SECRET
+    else process.env.JWT_SECRET = previousSecret
   }
 })
 

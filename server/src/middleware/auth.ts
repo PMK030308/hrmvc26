@@ -6,10 +6,10 @@ import jwt from 'jsonwebtoken'
 import type { AuthUser, RoleCode } from '../types.js'
 import { httpError } from '../types.js'
 import { loadAuthorizationActor, type AuthorizationActor } from '../authz/authorizationActor.js'
-import { resolveSecurityConfig } from '../lib/securityConfig.js'
+import { resolveJwtSecret } from '../lib/securityConfig.js'
 
 const JWT_TTL = '7d'
-const jwtSecret = () => resolveSecurityConfig(process.env).jwtSecret
+const jwtSecret = () => resolveJwtSecret(process.env)
 
 export function signToken(user: AuthUser): string {
   return jwt.sign({ id: user.id }, jwtSecret(), { expiresIn: JWT_TTL })
