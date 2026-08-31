@@ -42,7 +42,7 @@ test('phase 7 migration adds approval uniqueness and attachment provenance witho
       VALUES ('attachment-1', 'request-1', 'proof.pdf', 8, 'application/pdf', 'data:application/pdf;base64,JVBERi0xLjQ=', '2026-08-31T09:00:00');
     `)
 
-    assert.deepEqual(runMigrations(database, SCHEMA_MIGRATIONS).appliedVersions, [1, 2, 3, 4])
+    assert.deepEqual(runMigrations(database, SCHEMA_MIGRATIONS.slice(0, 4)).appliedVersions, [1, 2, 3, 4])
     const columns = new Set((database.prepare('PRAGMA table_info(request_attachments)').all() as any[]).map((row) => row.name))
     assert.equal(columns.has('uploaded_by_user_id'), true)
     assert.equal(columns.has('checksum_sha256'), true)
@@ -65,7 +65,7 @@ test('phase 7 migration stops on duplicate approval levels without deleting or g
       VALUES ('approval-1', 'request-1', 'leaves', 1, 'Manager'),
              ('approval-2', 'request-1', 'leaves', 1, 'Other');
     `)
-    assert.throws(() => runMigrations(database, SCHEMA_MIGRATIONS), /request-1.*level 1/i)
+    assert.throws(() => runMigrations(database, SCHEMA_MIGRATIONS.slice(0, 4)), /request-1.*level 1/i)
     assert.equal((database.prepare('SELECT COUNT(*) count FROM request_approvals').get() as any).count, 2)
     assert.equal((database.prepare("SELECT COUNT(*) count FROM schema_migrations WHERE version=4").get() as any).count, 0)
   } finally { database.close() }

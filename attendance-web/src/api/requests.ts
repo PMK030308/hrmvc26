@@ -1,7 +1,7 @@
 // ============================================================================
 // API — Đơn từ + duyệt (§14.5 / §14.6) — HTTP.
 // ============================================================================
-import { api } from './http'
+import { api, http } from './http'
 import type {
   RequestType, AnyRequest, RequestCatalog, RequestAttachment, ShiftSchedule, Shift,
 } from '@/types'
@@ -48,6 +48,22 @@ export const requestsApi = {
 
   deleteAttachment(attachmentId: string): Promise<{ ok: true }> {
     return api.del(`/requests/attachments/${attachmentId}`)
+  },
+
+  async downloadAttachment(attachmentId: string, fileName: string): Promise<void> {
+    const response = await http.get<Blob>(`/requests/attachments/${attachmentId}/download`, { responseType: 'blob' })
+    const url = URL.createObjectURL(response.data)
+    try {
+      const link = document.createElement('a')
+      link.href = url
+      link.download = fileName
+      link.rel = 'noopener'
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+    } finally {
+      window.setTimeout(() => URL.revokeObjectURL(url), 0)
+    }
   },
 
   myShiftOnDate(date: string): Promise<{ shift: Shift | null; schedule: ShiftSchedule | null }> {

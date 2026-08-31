@@ -530,7 +530,6 @@ export interface RequestAttachment {
   fileName: string
   fileSize: number
   mimeType: string
-  dataUrl: string
   uploadedAt: string
 }
 

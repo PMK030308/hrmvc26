@@ -10,6 +10,8 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "seed": "tsx src/seed.ts",
+    "attachments:backfill": "tsx src/scripts/attachmentStorageMaintenance.ts backfill",
+    "attachments:cleanup": "tsx src/scripts/attachmentStorageMaintenance.ts cleanup",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js"
   },

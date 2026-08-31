@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { isUtf8 } from 'node:buffer'
 import { httpError } from '../types.js'
 
 const DEFAULT_MAX_BYTES = 5 * 1024 * 1024
@@ -26,7 +27,7 @@ export interface PreparedAttachmentUpload {
   fileName: string
   fileSize: number
   mimeType: string
-  dataUrl: string
+  content: Buffer
   uploadedByUserId: string
   checksumSha256: string
 }
@@ -54,7 +55,19 @@ function hasExpectedSignature(mimeType: string, content: Buffer): boolean {
   if (mimeType === 'image/png') return content.length >= 8 && content.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
   if (mimeType === 'image/jpeg') return content.length >= 3 && content[0] === 0xff && content[1] === 0xd8 && content[2] === 0xff
   if (mimeType === 'image/webp') return content.length >= 12 && content.subarray(0, 4).toString('ascii') === 'RIFF' && content.subarray(8, 12).toString('ascii') === 'WEBP'
-  return true
+  if (mimeType === 'text/plain' || mimeType === 'text/csv') return isUtf8(content) && !content.includes(0)
+  if (mimeType === 'application/msword' || mimeType === 'application/vnd.ms-excel') {
+    return content.length >= 8 && content.subarray(0, 8).equals(Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]))
+  }
+  if (mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+    return content.length >= 4 && content.subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04]))
+      && content.includes(Buffer.from('[Content_Types].xml')) && content.includes(Buffer.from('word/'))
+  }
+  if (mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') {
+    return content.length >= 4 && content.subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04]))
+      && content.includes(Buffer.from('[Content_Types].xml')) && content.includes(Buffer.from('xl/'))
+  }
+  return false
 }
 
 export function prepareAttachmentUpload(
@@ -88,7 +101,7 @@ export function prepareAttachmentUpload(
     fileName,
     fileSize: content.length,
     mimeType,
-    dataUrl,
+    content,
     uploadedByUserId: actorUserId,
     checksumSha256: createHash('sha256').update(content).digest('hex'),
   }

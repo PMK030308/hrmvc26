@@ -6,7 +6,10 @@ import {
   getEmployee, allShifts, mapShift, getSchedule, getShift, mapRequest, getRequest, allRequests, mapAttachment, uid,
 } from '../repo.js'
 import { httpError } from '../types.js'
-import { decodeStoredAttachment, prepareAttachmentUpload } from '../services/attachmentService.js'
+import { prepareAttachmentUpload } from '../services/attachmentService.js'
+import { attachmentStorageKey } from '../services/attachmentStorage.js'
+import { getPrimaryAttachmentStorage, storageForAttachment } from '../services/attachmentStorageRuntime.js'
+import { completeAttachmentCleanup, failAttachmentCleanup, queueAttachmentCleanup } from '../services/attachmentCleanupService.js'
 import { pushAudit } from '../helpers.js'
 import {
   createRequest, approveRequest, rejectRequest, cancelRequest, updateRequest,
@@ -21,6 +24,12 @@ import { isEligibleShiftSwapPartner, listEligibleShiftSwapPartners } from '../au
 const VALID_TYPES = ['leaves', 'late-earlies', 'overtimes', 'business-trips', 'shift-swaps', 'attendance-updates']
 
 export const requestsRouter = Router()
+
+function attachmentRouteError(error: unknown, publicMessage: string): unknown {
+  if (typeof error === 'object' && error !== null && 'status' in error) return error
+  console.error('[ATTACHMENT_STORAGE]', error)
+  return httpError(500, publicMessage)
+}
 
 requestsRouter.get('/mine', requireAuth, (req: AuthedRequest, res) => {
   const actor = loadRequestActor(req.user!.id)
@@ -143,27 +152,52 @@ requestsRouter.get('/:type/:id/attachments', requireAuth, (req: AuthedRequest, r
   } catch (e) { next(e) }
 })
 
-requestsRouter.post('/:type/:id/attachments', requireAuth, (req: AuthedRequest, res, next) => {
+requestsRouter.post('/:type/:id/attachments', requireAuth, async (req: AuthedRequest, res, next) => {
+  let storedKey: string | null = null
   try {
+    const actor = loadRequestActor(req.user!.id)
+    const context = loadRequestAuthorizationContext(req.params.type, req.params.id)
+    if (!context) throw httpError(404, 'Không tìm thấy đơn.')
+    assertAuthorizedAction(actor, context, canManageRequestAttachment(actor, context, 'upload'))
+    const file = prepareAttachmentUpload(req.body ?? {}, req.user!.id)
+    const attachmentId = uid('att')
+    const storage = getPrimaryAttachmentStorage()
+    storedKey = attachmentStorageKey(attachmentId, file.checksumSha256)
+    await storage.put({
+      key: storedKey,
+      content: file.content,
+      contentType: file.mimeType,
+      checksumSha256: file.checksumSha256,
+    })
+
     const attachment = db.transaction(() => {
-      const actor = loadRequestActor(req.user!.id)
-      const context = loadRequestAuthorizationContext(req.params.type, req.params.id)
-      if (!context) throw httpError(404, 'Không tìm thấy đơn.')
-      assertAuthorizedAction(actor, context, canManageRequestAttachment(actor, context, 'upload'))
-      const file = prepareAttachmentUpload(req.body ?? {}, req.user!.id)
-      const attachmentId = uid('att')
+      const freshActor = loadRequestActor(req.user!.id)
+      const freshContext = loadRequestAuthorizationContext(req.params.type, req.params.id)
+      if (!freshContext) throw httpError(404, 'Không tìm thấy đơn.')
+      assertAuthorizedAction(freshActor, freshContext, canManageRequestAttachment(freshActor, freshContext, 'upload'))
+      const uploadedAt = isoNow()
       db.prepare(`INSERT INTO request_attachments
-        (id, request_id, file_name, file_size, mime_type, data_url, uploaded_at, uploaded_by_user_id, checksum_sha256)
-        VALUES (?,?,?,?,?,?,?,?,?)`)
-        .run(attachmentId, req.params.id, file.fileName, file.fileSize, file.mimeType, file.dataUrl, isoNow(), file.uploadedByUserId, file.checksumSha256)
+        (id, request_id, file_name, file_size, mime_type, data_url, uploaded_at, uploaded_by_user_id, checksum_sha256,
+         storage_provider, storage_key, storage_migrated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+        .run(attachmentId, req.params.id, file.fileName, file.fileSize, file.mimeType, '', uploadedAt,
+          file.uploadedByUserId, file.checksumSha256, storage.provider, storedKey, uploadedAt)
       pushAudit(req.user!.id, req.user!.email, 1, 'Attachment', attachmentId, `Đính kèm ${file.fileName} vào đơn ${req.params.id}`)
       return mapAttachment(db.prepare('SELECT * FROM request_attachments WHERE id=?').get(attachmentId) as any)
     })()
+    storedKey = null
     res.json(attachment)
-  } catch (e) { next(e) }
+  } catch (e) {
+    if (storedKey) {
+      try { await getPrimaryAttachmentStorage().delete(storedKey) } catch (cleanupError) {
+        queueAttachmentCleanup(db, 'local', storedKey, cleanupError)
+      }
+    }
+    next(attachmentRouteError(e, 'Không thể lưu file đính kèm.'))
+  }
 })
 
-requestsRouter.get('/attachments/:attachmentId/download', requireAuth, (req: AuthedRequest, res, next) => {
+requestsRouter.get('/attachments/:attachmentId/download', requireAuth, async (req: AuthedRequest, res, next) => {
   try {
     const attachment = db.prepare(`SELECT a.*, r.type FROM request_attachments a
       JOIN requests r ON r.id=a.request_id WHERE a.id=?`).get(req.params.attachmentId) as any
@@ -171,23 +205,26 @@ requestsRouter.get('/attachments/:attachmentId/download', requireAuth, (req: Aut
     const actor = loadRequestActor(req.user!.id)
     const context = loadRequestAuthorizationContext(attachment.type, attachment.request_id)
     if (!context || !canManageRequestAttachment(actor, context, 'read')) throw httpError(404, 'Không tìm thấy file đính kèm.')
-    const content = decodeStoredAttachment({
-      dataUrl: attachment.data_url,
-      mimeType: attachment.mime_type,
-      checksumSha256: attachment.checksum_sha256,
-    })
-    const safeName = String(attachment.file_name).replace(/["\r\n]/g, '_')
+    const { storage, key } = storageForAttachment(db, attachment)
+    const object = await storage.open(key)
+    if (object.size !== attachment.file_size) throw httpError(500, 'Kích thước file lưu trữ không khớp metadata.')
+    const originalName = String(attachment.file_name)
+    const safeName = originalName.replace(/[^\x20-\x7e]|["\\\r\n]/g, '_') || 'attachment'
     res.setHeader('Content-Type', attachment.mime_type)
-    res.setHeader('Content-Length', String(content.length))
-    res.setHeader('Content-Disposition', `attachment; filename="${safeName}"; filename*=UTF-8''${encodeURIComponent(safeName)}`)
+    res.setHeader('Content-Length', String(object.size))
+    res.setHeader('Content-Disposition', `attachment; filename="${safeName}"; filename*=UTF-8''${encodeURIComponent(originalName)}`)
     res.setHeader('X-Content-Type-Options', 'nosniff')
-    res.send(content)
-  } catch (error) { next(error) }
+    res.setHeader('Cache-Control', 'private, no-store')
+    res.setHeader('Cross-Origin-Resource-Policy', 'same-origin')
+    res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox")
+    object.stream.once('error', next)
+    object.stream.pipe(res)
+  } catch (error) { next(attachmentRouteError(error, 'Không thể đọc file đính kèm.')) }
 })
 
-requestsRouter.delete('/attachments/:attachmentId', requireAuth, (req: AuthedRequest, res, next) => {
+requestsRouter.delete('/attachments/:attachmentId', requireAuth, async (req: AuthedRequest, res, next) => {
   try {
-    db.transaction(() => {
+    const target = db.transaction(() => {
       const attachment = db.prepare(`SELECT a.*, r.type FROM request_attachments a
         JOIN requests r ON r.id=a.request_id WHERE a.id=?`).get(req.params.attachmentId) as any
       if (!attachment) throw httpError(404, 'Không tìm thấy file đính kèm.')
@@ -195,10 +232,21 @@ requestsRouter.delete('/attachments/:attachmentId', requireAuth, (req: AuthedReq
       const context = loadRequestAuthorizationContext(attachment.type, attachment.request_id)
       if (!context) throw httpError(404, 'Không tìm thấy file đính kèm.')
       assertAuthorizedAction(actor, context, canManageRequestAttachment(actor, context, 'delete'))
+      const storageTarget = storageForAttachment(db, attachment)
+      const cleanupId = storageTarget.storage.provider === 'legacy-data-url'
+        ? null
+        : queueAttachmentCleanup(db, storageTarget.storage.provider, storageTarget.key)
       const deleted = db.prepare('DELETE FROM request_attachments WHERE id=?').run(req.params.attachmentId)
       if (deleted.changes !== 1) throw httpError(404, 'Không tìm thấy file đính kèm.')
       pushAudit(req.user!.id, req.user!.email, 3, 'Attachment', req.params.attachmentId, `Xóa đính kèm ${req.params.attachmentId}`)
+      return { ...storageTarget, cleanupId }
     })()
+    try {
+      await target.storage.delete(target.key)
+      if (target.cleanupId) completeAttachmentCleanup(db, target.cleanupId)
+    } catch (storageError) {
+      if (target.cleanupId) failAttachmentCleanup(db, target.cleanupId, storageError)
+    }
     res.json({ ok: true })
   } catch (e) { next(e) }
 })

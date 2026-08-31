@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -11,9 +12,10 @@ test('local attachment storage round-trips private content and supports idempote
   try {
     const storage = new LocalAttachmentStorage(root)
     const content = Buffer.from('%PDF-1.4')
-    const key = attachmentStorageKey('att-1', 'a'.repeat(64))
+    const checksum = createHash('sha256').update(content).digest('hex')
+    const key = attachmentStorageKey('att-1', checksum)
 
-    await storage.put({ key, content, contentType: 'application/pdf', checksumSha256: 'a'.repeat(64) })
+    await storage.put({ key, content, contentType: 'application/pdf', checksumSha256: checksum })
     const object = await storage.open(key)
     assert.equal(object.size, content.length)
     assert.deepEqual(await streamToBuffer(object.stream), content)

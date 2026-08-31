@@ -25,10 +25,12 @@ import { chatbotRouter } from './routes/chatbot.js'
 import { ensureDefaultRolePermissions } from './services/permissionService.js'
 import { runMigrations } from './services/migrationService.js'
 import { isCorsOriginAllowed, resolveSecurityConfig } from './lib/securityConfig.js'
+import { getPrimaryAttachmentStorage } from './services/attachmentStorageRuntime.js'
 
 const app = express()
 const PORT = Number(process.env.PORT) || 4000
 const securityConfig = resolveSecurityConfig(process.env)
+getPrimaryAttachmentStorage()
 
 app.set('trust proxy', securityConfig.trustProxy)
 app.use(cors({

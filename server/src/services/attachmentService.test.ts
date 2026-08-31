@@ -34,3 +34,40 @@ test('attachment preparation rejects content over the configured decoded byte li
     dataUrl: `data:application/pdf;base64,${oversized.toString('base64')}`,
   }, 'user-1', { maxBytes: 1024 }), (error: any) => error.status === 413)
 })
+
+test('attachment preparation validates magic bytes for images, legacy Office and OpenXML containers', () => {
+  const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])
+  assert.equal(prepareAttachmentUpload({
+    fileName: 'proof.png', fileSize: png.length, mimeType: 'image/png',
+    dataUrl: `data:image/png;base64,${png.toString('base64')}`,
+  }, 'user-1').fileSize, png.length)
+  assert.throws(() => prepareAttachmentUpload({
+    fileName: 'proof.png', fileSize: pdf.length, mimeType: 'image/png', dataUrl: `data:image/png;base64,${pdf.toString('base64')}`,
+  }, 'user-1'), (error: any) => error.status === 400)
+
+  const ole = Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1])
+  assert.equal(prepareAttachmentUpload({
+    fileName: 'proof.doc', fileSize: ole.length, mimeType: 'application/msword',
+    dataUrl: `data:application/msword;base64,${ole.toString('base64')}`,
+  }, 'user-1').fileSize, ole.length)
+
+  const docx = Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04]), Buffer.from('[Content_Types].xml word/document.xml')])
+  assert.equal(prepareAttachmentUpload({
+    fileName: 'proof.docx', fileSize: docx.length,
+    mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    dataUrl: `data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,${docx.toString('base64')}`,
+  }, 'user-1').fileSize, docx.length)
+})
+
+test('attachment preparation accepts valid UTF-8 text but rejects binary content disguised as text', () => {
+  const text = Buffer.from('attendance evidence\n')
+  assert.equal(prepareAttachmentUpload({
+    fileName: 'proof.txt', fileSize: text.length, mimeType: 'text/plain',
+    dataUrl: `data:text/plain;base64,${text.toString('base64')}`,
+  }, 'user-1').fileSize, text.length)
+  const binary = Buffer.from([0, 1, 2, 3])
+  assert.throws(() => prepareAttachmentUpload({
+    fileName: 'proof.txt', fileSize: binary.length, mimeType: 'text/plain',
+    dataUrl: `data:text/plain;base64,${binary.toString('base64')}`,
+  }, 'user-1'), (error: any) => error.status === 400)
+})

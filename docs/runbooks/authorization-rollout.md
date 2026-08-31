@@ -15,9 +15,33 @@ Runbook này áp dụng cho rollout authorization/integrity Phase 1–7 của ba
 - `ATTACHMENT_MAX_BYTES`: mặc định 5 MiB decoded.
 - `AVATAR_MAX_BYTES`: mặc định 2 MiB decoded.
 - `JSON_BODY_LIMIT`: mặc định `8mb`; phải lớn hơn payload base64 hợp lệ nhưng không mở rộng tùy tiện.
+- `ATTACHMENT_STORAGE_PROVIDER=local`: provider production đầu tiên; mọi route vẫn đi qua `AttachmentStorage` để có thể thay bằng private Cloudflare R2.
+- `ATTACHMENT_STORAGE_ROOT`: đường dẫn tuyệt đối trên persistent volume, nằm ngoài web root và không được public trực tiếp.
+- `ATTACHMENT_STORAGE_PERSISTENT_VOLUME=true` và `ATTACHMENT_STORAGE_BACKUP_CONFIRMED=true`: xác nhận vận hành bắt buộc. Nếu không có volume và backup đáng tin cậy, dừng rollout local và chuyển sang private R2.
 - Rate limit có thể điều chỉnh qua các biến `LOGIN_*`, `FORGOT_PASSWORD_*`, `FACE_VERIFY_*`, `DEVICE_PUNCH_*`; giữ default nếu chưa có số liệu staging.
 
-Startup production phải dừng nếu thiếu JWT secret hợp lệ hoặc CORS allowlist.
+Startup production phải dừng nếu thiếu JWT secret hợp lệ, CORS allowlist hoặc local attachment storage chưa được xác nhận persistent/backup.
+
+### Phase 8 attachment storage commands
+
+Các command không tự chạy schema migration và mặc định chỉ dry-run:
+
+```bash
+npm run attachments:backfill
+npm run attachments:cleanup
+```
+
+Chỉ mutation khi thêm `-- --apply`; batch size từ 1 đến 500:
+
+```bash
+npm run attachments:backfill -- --apply --batch-size=100
+npm run attachments:cleanup -- --apply --batch-size=100
+```
+
+- Backfill xác minh allowlist, magic bytes, decoded size và checksum trước/sau khi ghi file.
+- Lỗi một attachment không xóa `data_url` legacy và command trả exit code khác 0.
+- Cleanup retry các object đã được queue sau delete/compensation; error lưu trong DB đã được redaction.
+- Không chạy `--apply` trên production trước backup, rehearsal DB copy và xác nhận persistent volume.
 
 ## 3. Preflight database
 
@@ -56,6 +80,8 @@ Kiểm tra sau migration:
 - Unique `(request_id, level)` hoạt động.
 - Attachment cũ vẫn đọc được; cột uploader/checksum của dữ liệu cũ được phép `NULL`.
 - Upload mới có uploader, checksum SHA-256 và kích thước derived từ decoded content.
+- Migration version 5 chỉ thêm storage metadata và cleanup queue; không tự copy hoặc xóa payload legacy.
+- Backfill dry-run phải báo không lỗi trước khi chạy apply; sau apply phải xác minh file size/checksum và download authorization.
 - Unique payslip vẫn hoạt động.
 
 ## 5. Trình tự rollout

@@ -110,4 +110,40 @@ export const SCHEMA_MIGRATIONS: readonly SchemaMigration[] = [
         ON request_attachments(request_id)`)
     },
   },
+  {
+    version: 5,
+    name: 'attachment_storage_expand',
+    checksumSource: [
+      'request_attachments.storage_provider TEXT',
+      'request_attachments.storage_key TEXT',
+      'request_attachments.storage_migrated_at TEXT',
+      'UNIQUE request_attachments(storage_provider,storage_key)',
+      'attachment_storage_cleanup(id,storage_provider,storage_key,created_at,last_attempt_at,last_error,completed_at)',
+    ].join('\n'),
+    up(database) {
+      if (!hasColumn(database, 'request_attachments', 'storage_provider')) {
+        database.exec('ALTER TABLE request_attachments ADD COLUMN storage_provider TEXT')
+      }
+      if (!hasColumn(database, 'request_attachments', 'storage_key')) {
+        database.exec('ALTER TABLE request_attachments ADD COLUMN storage_key TEXT')
+      }
+      if (!hasColumn(database, 'request_attachments', 'storage_migrated_at')) {
+        database.exec('ALTER TABLE request_attachments ADD COLUMN storage_migrated_at TEXT')
+      }
+      database.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_request_attachments_storage_key
+        ON request_attachments(storage_provider, storage_key)
+        WHERE storage_provider IS NOT NULL AND storage_key IS NOT NULL`)
+      database.exec(`CREATE TABLE IF NOT EXISTS attachment_storage_cleanup (
+        id TEXT PRIMARY KEY,
+        storage_provider TEXT NOT NULL,
+        storage_key TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        last_attempt_at TEXT,
+        last_error TEXT,
+        completed_at TEXT
+      ); CREATE UNIQUE INDEX IF NOT EXISTS idx_attachment_storage_cleanup_pending
+        ON attachment_storage_cleanup(storage_provider, storage_key)
+        WHERE completed_at IS NULL`)
+    },
+  },
 ]

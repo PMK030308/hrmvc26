@@ -97,6 +97,10 @@ export function Attachments({ type, id, attachments, canUpload, canDelete }: {
     onSuccess: () => { toast.success('Đã xóa đính kèm'); qc.invalidateQueries({ queryKey: ['request', type, id] }) },
     onError: (e: Error) => toast.error(e.message),
   })
+  const download = useMutation({
+    mutationFn: (attachment: RequestAttachment) => requestsApi.downloadAttachment(attachment.id, attachment.fileName),
+    onError: (e: Error) => toast.error(e.message),
+  })
 
   return (
     <Card>
@@ -119,7 +123,13 @@ export function Attachments({ type, id, attachments, canUpload, canDelete }: {
                 <p className="truncate text-sm font-medium text-slate-800">{a.fileName}</p>
                 <p className="text-xs text-slate-400">{fmtBytes(a.fileSize)} · {fmtDate(a.uploadedAt)}</p>
               </div>
-              {a.mimeType.startsWith('image/') && <img src={a.dataUrl} alt={a.fileName} className="h-10 w-10 rounded-lg object-cover ring-1 ring-slate-200" />}
+              <button
+                onClick={() => download.mutate(a)}
+                className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-brand-600 hover:bg-brand-50"
+                disabled={download.isPending}
+              >
+                Tải xuống
+              </button>
               {canDelete && (
                 <button onClick={() => del.mutate(a.id)} className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-danger-50 hover:text-danger-600">
                   {del.isPending ? <Spinner className="h-4 w-4" /> : <Trash2 className="h-4 w-4" />}
