@@ -6,7 +6,7 @@ import {
   getEmployee, allShifts, mapShift, getSchedule, getShift, mapRequest, getRequest, allRequests, mapAttachment, uid,
 } from '../repo.js'
 import { httpError } from '../types.js'
-import { prepareAttachmentUpload } from '../services/attachmentService.js'
+import { decodeStoredAttachment, prepareAttachmentUpload } from '../services/attachmentService.js'
 import { pushAudit } from '../helpers.js'
 import {
   createRequest, approveRequest, rejectRequest, cancelRequest, updateRequest,
@@ -161,6 +161,28 @@ requestsRouter.post('/:type/:id/attachments', requireAuth, (req: AuthedRequest, 
     })()
     res.json(attachment)
   } catch (e) { next(e) }
+})
+
+requestsRouter.get('/attachments/:attachmentId/download', requireAuth, (req: AuthedRequest, res, next) => {
+  try {
+    const attachment = db.prepare(`SELECT a.*, r.type FROM request_attachments a
+      JOIN requests r ON r.id=a.request_id WHERE a.id=?`).get(req.params.attachmentId) as any
+    if (!attachment) throw httpError(404, 'Không tìm thấy file đính kèm.')
+    const actor = loadRequestActor(req.user!.id)
+    const context = loadRequestAuthorizationContext(attachment.type, attachment.request_id)
+    if (!context || !canManageRequestAttachment(actor, context, 'read')) throw httpError(404, 'Không tìm thấy file đính kèm.')
+    const content = decodeStoredAttachment({
+      dataUrl: attachment.data_url,
+      mimeType: attachment.mime_type,
+      checksumSha256: attachment.checksum_sha256,
+    })
+    const safeName = String(attachment.file_name).replace(/["\r\n]/g, '_')
+    res.setHeader('Content-Type', attachment.mime_type)
+    res.setHeader('Content-Length', String(content.length))
+    res.setHeader('Content-Disposition', `attachment; filename="${safeName}"; filename*=UTF-8''${encodeURIComponent(safeName)}`)
+    res.setHeader('X-Content-Type-Options', 'nosniff')
+    res.send(content)
+  } catch (error) { next(error) }
 })
 
 requestsRouter.delete('/attachments/:attachmentId', requireAuth, (req: AuthedRequest, res, next) => {

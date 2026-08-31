@@ -9,6 +9,7 @@
 import { Router } from 'express'
 import { requireAuth, requirePermission, type AuthedRequest } from '../middleware/auth.js'
 import { httpError } from '../types.js'
+import { getClientIp } from '../lib/clientIp.js'
 import {
   getFaceData, upsertFaceData, createAttemptToken, consumeAttemptToken, getRegulation,
 } from '../repo.js'
@@ -131,7 +132,7 @@ faceRouter.post('/verify', requireAuth, requirePermission(FACE_SELF_PERMISSION),
 
     // Hợp lệ -> ghi lượt chấm công (source=1 Face) + GPS + IP thiết bị người chấm.
     const snapshotBase64 = liveness?.snapshotBase64 ?? null
-    const ipAddress = clientIp(req)
+    const ipAddress = getClientIp(req)
     const result = processPunch(empId, 1, {
       latitude: gps?.lat, longitude: gps?.lng, accuracy: gps?.accuracy,
       ipAddress, snapshotBase64, notes: 'Face',
@@ -141,9 +142,3 @@ faceRouter.post('/verify', requireAuth, requirePermission(FACE_SELF_PERMISSION),
   } catch (e) { next(e) }
 })
 
-/** IP của client: ưu tiên X-Forwarded-For (sau proxy/Render), fallback req.ip. */
-function clientIp(req: any): string {
-  const xff = req.header('x-forwarded-for')
-  if (xff) return String(xff).split(',')[0]!.trim()
-  return req.ip ?? ''
-}

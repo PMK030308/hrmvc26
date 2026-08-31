@@ -9,10 +9,21 @@ import { pushAudit } from '../helpers.js'
 import { validatePasswordChange } from '../lib/profile.js'
 import { loadAuthorizationActor } from '../authz/authorizationActor.js'
 import { getPermissionMatrixSnapshot } from '../services/permissionService.js'
+import { createRateLimitMiddleware } from '../middleware/rateLimit.js'
 
 export const authRouter = Router()
 
-authRouter.post('/login', (req, res, next) => {
+const loginRateLimit = createRateLimitMiddleware({
+  windowMs: Number(process.env.LOGIN_RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
+  maxAttempts: Number(process.env.LOGIN_RATE_LIMIT_MAX) || 10,
+  key: (request) => `${request.ip}:${String(request.body?.email ?? '').trim().toLowerCase()}`,
+})
+const forgotPasswordRateLimit = createRateLimitMiddleware({
+  windowMs: Number(process.env.FORGOT_PASSWORD_RATE_LIMIT_WINDOW_MS) || 60 * 60 * 1000,
+  maxAttempts: Number(process.env.FORGOT_PASSWORD_RATE_LIMIT_MAX) || 5,
+})
+
+authRouter.post('/login', loginRateLimit, (req, res, next) => {
   try {
     const { email, password } = req.body ?? {}
     const row = db.prepare('SELECT * FROM users WHERE LOWER(email) = LOWER(?)').get((email ?? '').toLowerCase()) as any
@@ -52,7 +63,7 @@ authRouter.get('/me', requireAuth, (req: AuthedRequest, res, next) => {
   } catch (e) { next(e) }
 })
 
-authRouter.post('/forgot-password', (req, res) => {
+authRouter.post('/forgot-password', forgotPasswordRateLimit, (req, res) => {
   const { email } = req.body ?? {}
   res.json({ ok: true, message: `Đường link đặt lại mật khẩu đã được gửi đến ${email} (demo).` })
 })

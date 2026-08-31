@@ -24,11 +24,19 @@ import { delegationRouter } from './routes/delegation.js'
 import { chatbotRouter } from './routes/chatbot.js'
 import { ensureDefaultRolePermissions } from './services/permissionService.js'
 import { runMigrations } from './services/migrationService.js'
+import { isCorsOriginAllowed, resolveSecurityConfig } from './lib/securityConfig.js'
 
 const app = express()
 const PORT = Number(process.env.PORT) || 4000
+const securityConfig = resolveSecurityConfig(process.env)
 
-app.use(cors())
+app.set('trust proxy', securityConfig.trustProxy)
+app.use(cors({
+  origin(origin, callback) {
+    if (isCorsOriginAllowed(securityConfig, origin)) return callback(null, true)
+    callback(new HttpError(403, 'Origin không được phép.'))
+  },
+}))
 app.use(express.json({ limit: '12mb' })) // avatar/attachment base64
 app.use(morgan('dev'))
 

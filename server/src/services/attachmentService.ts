@@ -31,6 +31,19 @@ export interface PreparedAttachmentUpload {
   checksumSha256: string
 }
 
+export function decodeStoredAttachment(input: { dataUrl: string; mimeType: string; checksumSha256?: string | null }): Buffer {
+  const escapedMime = input.mimeType.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const match = input.dataUrl.match(new RegExp(`^data:${escapedMime};base64,([A-Za-z0-9+/]*={0,2})$`))
+  if (!match || match[1].length % 4 !== 0) throw httpError(500, 'Dữ liệu file lưu trữ không hợp lệ.')
+  const content = Buffer.from(match[1], 'base64')
+  if (content.toString('base64') !== match[1]) throw httpError(500, 'Dữ liệu file lưu trữ bị hỏng.')
+  if (input.checksumSha256) {
+    const checksum = createHash('sha256').update(content).digest('hex')
+    if (checksum !== input.checksumSha256) throw httpError(500, 'Checksum file không khớp.')
+  }
+  return content
+}
+
 function configuredMaxBytes(): number {
   const configured = Number(process.env.ATTACHMENT_MAX_BYTES)
   return Number.isSafeInteger(configured) && configured > 0 ? configured : DEFAULT_MAX_BYTES

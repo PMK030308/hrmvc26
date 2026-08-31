@@ -6,12 +6,13 @@ import jwt from 'jsonwebtoken'
 import type { AuthUser, RoleCode } from '../types.js'
 import { httpError } from '../types.js'
 import { loadAuthorizationActor, type AuthorizationActor } from '../authz/authorizationActor.js'
+import { resolveSecurityConfig } from '../lib/securityConfig.js'
 
-const JWT_SECRET = process.env.JWT_SECRET || 'hrm-attendance-dev-secret-change-me'
 const JWT_TTL = '7d'
+const jwtSecret = () => resolveSecurityConfig(process.env).jwtSecret
 
 export function signToken(user: AuthUser): string {
-  return jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: JWT_TTL })
+  return jwt.sign({ id: user.id }, jwtSecret(), { expiresIn: JWT_TTL })
 }
 
 export interface AuthedRequest extends Request {
@@ -25,7 +26,7 @@ export function requireAuth(req: AuthedRequest, _res: Response, next: NextFuncti
   if (!header || !header.startsWith('Bearer ')) return next(httpError(401, 'Chưa đăng nhập.'))
   const token = header.slice(7)
   try {
-    const payload = jwt.verify(token, JWT_SECRET) as { id?: unknown }
+    const payload = jwt.verify(token, jwtSecret()) as { id?: unknown }
     if (typeof payload.id !== 'string') throw new Error('invalid subject')
     const actor = loadAuthorizationActor(payload.id)
     req.authorizationActor = actor

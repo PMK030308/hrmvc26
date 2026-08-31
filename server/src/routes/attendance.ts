@@ -10,6 +10,7 @@ import { loadAuthorizationActor, matchesEffectiveEmployeeScope } from '../authz/
 import { ATTENDANCE_PERMISSIONS, canProxyPunch } from '../authz/attendanceAuthorization.js'
 import { authenticateAttendanceDevice, createAttendanceDevice, revokeAttendanceDevice, rotateAttendanceDeviceCredential } from '../services/deviceAuthService.js'
 import { httpError } from '../types.js'
+import { getClientIp } from '../lib/clientIp.js'
 
 export const attendanceRouter = Router()
 
@@ -52,7 +53,7 @@ attendanceRouter.post('/punch', requireAuth, requirePermission(ATTENDANCE_PERMIS
       res.status(400).json({ status: 400, message: 'Chấm công bằng khuôn mặt phải quét mặt thật tại trang Chấm công khuôn mặt. Không được chấm trực tiếp.' })
       return
     }
-    p.ipAddress = clientIp(req)
+    p.ipAddress = getClientIp(req)
     const result = processPunch(emp.id, p.source, p)
     pushAudit(req.user!.id, emp.fullName, 1, 'AttendancePunch', null, `Chấm công (${p.source}) — ${result.message}`)
     res.json(result)
@@ -78,23 +79,16 @@ attendanceRouter.post('/device-punch', (req, res, next) => {
     if (!emp) { res.status(404).json({ status: 404, message: `Không tìm thấy nhân viên ${employeeCode}.` }); return }
     // punchedAt do máy đẩy (ISO giờ VN); nếu không có thì để engine dùng nowVn()
     const payload: any = {
-      latitude, longitude, wifiSsid, ipAddress: clientIp(req),
+      latitude, longitude, wifiSsid, ipAddress: getClientIp(req),
       deviceId: device.id, deviceInfo: `Device:${device.id}`,
     }
     if (punchedAt) payload.fixedPunchedAt = punchedAt
     const result = processPunch(emp.id, 1, payload) // source=1 device (vật lý)
     pushAudit(`device:${device.id}`, device.name, 1, 'AttendanceDevicePunch', null,
-      `device=${device.id}; employee=${emp.id}; ${result.message}`, clientIp(req))
+      `device=${device.id}; employee=${emp.id}; ${result.message}`, getClientIp(req))
     res.json(result)
   } catch (e) { next(e) }
 })
-
-/** IP của client: ưu tiên X-Forwarded-For (sau proxy/Render), fallback req.ip. */
-function clientIp(req: any): string {
-  const xff = req.header('x-forwarded-for')
-  if (xff) return String(xff).split(',')[0]!.trim()
-  return req.ip ?? ''
-}
 
 attendanceRouter.get('/today', requireAuth, requirePermission(ATTENDANCE_PERMISSIONS.VIEW_SELF), (req: AuthedRequest, res) => {
   const date = ymd(nowVn())
@@ -229,7 +223,7 @@ attendanceRouter.post('/proxy-punch', requireAuth, (req: AuthedRequest, res, nex
         if (!actor.permissions.has('attendance.proxy_punch')) throw httpError(403, 'Bạn không có quyền chấm công hộ.')
         throw httpError(404, 'Không tìm thấy nhân viên.')
       }
-      const ipAddress = clientIp(req)
+      const ipAddress = getClientIp(req)
       const output = proxyPunch(target.id, 99, {
         ...p, source: undefined, reason: undefined, ipAddress, deviceInfo: 'Proxy',
         proxyActorUserId: actor.userId, proxyReason: reason, notes: `Proxy: ${reason}`,
