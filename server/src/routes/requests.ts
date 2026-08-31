@@ -6,6 +6,7 @@ import {
   getEmployee, allShifts, mapShift, getSchedule, getShift, mapRequest, getRequest, allRequests, mapAttachment, uid,
 } from '../repo.js'
 import { httpError } from '../types.js'
+import { prepareAttachmentUpload } from '../services/attachmentService.js'
 import { pushAudit } from '../helpers.js'
 import {
   createRequest, approveRequest, rejectRequest, cancelRequest, updateRequest,
@@ -149,10 +150,12 @@ requestsRouter.post('/:type/:id/attachments', requireAuth, (req: AuthedRequest, 
       const context = loadRequestAuthorizationContext(req.params.type, req.params.id)
       if (!context) throw httpError(404, 'Không tìm thấy đơn.')
       assertAuthorizedAction(actor, context, canManageRequestAttachment(actor, context, 'upload'))
-      const file = req.body ?? {}
+      const file = prepareAttachmentUpload(req.body ?? {}, req.user!.id)
       const attachmentId = uid('att')
-      db.prepare(`INSERT INTO request_attachments (id, request_id, file_name, file_size, mime_type, data_url, uploaded_at) VALUES (?,?,?,?,?,?,?)`)
-        .run(attachmentId, req.params.id, file.fileName, file.fileSize, file.mimeType, file.dataUrl, isoNow())
+      db.prepare(`INSERT INTO request_attachments
+        (id, request_id, file_name, file_size, mime_type, data_url, uploaded_at, uploaded_by_user_id, checksum_sha256)
+        VALUES (?,?,?,?,?,?,?,?,?)`)
+        .run(attachmentId, req.params.id, file.fileName, file.fileSize, file.mimeType, file.dataUrl, isoNow(), file.uploadedByUserId, file.checksumSha256)
       pushAudit(req.user!.id, req.user!.email, 1, 'Attachment', attachmentId, `Đính kèm ${file.fileName} vào đơn ${req.params.id}`)
       return mapAttachment(db.prepare('SELECT * FROM request_attachments WHERE id=?').get(attachmentId) as any)
     })()

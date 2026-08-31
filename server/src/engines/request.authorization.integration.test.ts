@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -316,8 +317,9 @@ test('attachment routes hide the parent from outsiders and enforce separate uplo
     id: 'user-other', email: 'user-other@example.test', employeeId: 'employee-other',
     roles: ['Employee'], permissions: [], departmentScopes: [],
   }, secret, { expiresIn: '1h' })
+  const pdf = Buffer.from('%PDF-1.4')
   const uploadBody = JSON.stringify({
-    fileName: 'new.pdf', fileSize: 10, mimeType: 'application/pdf', dataUrl: 'data:application/pdf;base64,AA==',
+    fileName: 'new.pdf', fileSize: pdf.length, mimeType: 'application/pdf', dataUrl: `data:application/pdf;base64,${pdf.toString('base64')}`,
   })
 
   try {
@@ -328,9 +330,22 @@ test('attachment routes hide the parent from outsiders and enforce separate uplo
 
     const ownerHeaders = { Authorization: `Bearer ${ownerToken}`, 'Content-Type': 'application/json' }
     assert.equal((await fetch(`${baseUrl}/late-earlies/attachment-route/attachments`, { headers: ownerHeaders })).status, 200)
-    assert.equal((await fetch(`${baseUrl}/late-earlies/attachment-route/attachments`, { method: 'POST', headers: ownerHeaders, body: uploadBody })).status, 200)
+    const uploaded = await fetch(`${baseUrl}/late-earlies/attachment-route/attachments`, { method: 'POST', headers: ownerHeaders, body: uploadBody })
+    assert.equal(uploaded.status, 200)
+    const uploadedBody = await uploaded.json() as any
+    assert.equal(uploadedBody.uploadedByUserId, 'user-owner')
+    assert.equal(uploadedBody.checksumSha256, createHash('sha256').update(pdf).digest('hex'))
+    const stored = db.prepare('SELECT file_size, uploaded_by_user_id, checksum_sha256 FROM request_attachments WHERE id=?').get(uploadedBody.id) as any
+    assert.deepEqual(stored, { file_size: pdf.length, uploaded_by_user_id: 'user-owner', checksum_sha256: uploadedBody.checksumSha256 })
+
+    const malformed = JSON.stringify({ fileName: 'bad.pdf', fileSize: 1, mimeType: 'application/pdf', dataUrl: 'data:application/pdf;base64,***' })
+    assert.equal((await fetch(`${baseUrl}/late-earlies/attachment-route/attachments`, { method: 'POST', headers: ownerHeaders, body: malformed })).status, 400)
+    process.env.ATTACHMENT_MAX_BYTES = String(pdf.length - 1)
+    assert.equal((await fetch(`${baseUrl}/late-earlies/attachment-route/attachments`, { method: 'POST', headers: ownerHeaders, body: uploadBody })).status, 413)
+    delete process.env.ATTACHMENT_MAX_BYTES
     assert.equal((await fetch(`${baseUrl}/attachments/attachment-existing`, { method: 'DELETE', headers: ownerHeaders })).status, 200)
   } finally {
+    delete process.env.ATTACHMENT_MAX_BYTES
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
   }
 })

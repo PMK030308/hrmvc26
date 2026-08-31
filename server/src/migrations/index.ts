@@ -83,4 +83,31 @@ export const SCHEMA_MIGRATIONS: readonly SchemaMigration[] = [
       database.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_payslips_period_employee ON payslips(period, employee_id)')
     },
   },
+  {
+    version: 4,
+    name: 'request_approval_and_attachment_integrity',
+    checksumSource: [
+      'UNIQUE request_approvals(request_id,level)',
+      'request_attachments.uploaded_by_user_id TEXT',
+      'request_attachments.checksum_sha256 TEXT',
+      'INDEX request_attachments(request_id)',
+    ].join('\n'),
+    up(database) {
+      const duplicate = database.prepare(`SELECT request_id, level, COUNT(*) count FROM request_approvals
+        GROUP BY request_id, level HAVING COUNT(*) > 1 LIMIT 1`).get() as any
+      if (duplicate) {
+        throw new Error(`Cannot apply migration: request ${duplicate.request_id} has duplicate approval level ${duplicate.level}.`)
+      }
+      if (!hasColumn(database, 'request_attachments', 'uploaded_by_user_id')) {
+        database.exec('ALTER TABLE request_attachments ADD COLUMN uploaded_by_user_id TEXT')
+      }
+      if (!hasColumn(database, 'request_attachments', 'checksum_sha256')) {
+        database.exec('ALTER TABLE request_attachments ADD COLUMN checksum_sha256 TEXT')
+      }
+      database.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_request_approvals_request_level
+        ON request_approvals(request_id, level)`)
+      database.exec(`CREATE INDEX IF NOT EXISTS idx_request_attachments_request
+        ON request_attachments(request_id)`)
+    },
+  },
 ]

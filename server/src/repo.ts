@@ -184,6 +184,7 @@ export function mapAttachment(r: any) {
   return {
     id: r.id, requestId: r.request_id, fileName: r.file_name, fileSize: r.file_size,
     mimeType: r.mime_type, dataUrl: r.data_url, uploadedAt: r.uploaded_at,
+    uploadedByUserId: str(r.uploaded_by_user_id), checksumSha256: str(r.checksum_sha256),
   }
 }
 export function mapRequest(r: any) {
