@@ -332,7 +332,11 @@ test('attachment routes hide the parent from outsiders and enforce separate uplo
     assert.equal((await fetch(`${baseUrl}/attachments/attachment-existing`, { method: 'DELETE', headers: outsiderHeaders })).status, 404)
 
     const ownerHeaders = { Authorization: `Bearer ${ownerToken}`, 'Content-Type': 'application/json' }
-    assert.equal((await fetch(`${baseUrl}/late-earlies/attachment-route/attachments`, { headers: ownerHeaders })).status, 200)
+    const attachmentList = await fetch(`${baseUrl}/late-earlies/attachment-route/attachments`, { headers: ownerHeaders })
+    assert.equal(attachmentList.status, 200)
+    const listedAttachments = await attachmentList.json() as any[]
+    assert.equal(listedAttachments[0]?.dataUrl, undefined)
+    assert.equal(listedAttachments[0]?.storageKey, undefined)
     const download = await fetch(`${baseUrl}/attachments/attachment-existing/download`, { headers: ownerHeaders })
     assert.equal(download.status, 200)
     assert.equal(download.headers.get('content-type'), 'application/pdf')
