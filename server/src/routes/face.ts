@@ -10,6 +10,7 @@ import { Router } from 'express'
 import { requireAuth, requirePermission, type AuthedRequest } from '../middleware/auth.js'
 import { httpError } from '../types.js'
 import { getClientIp } from '../lib/clientIp.js'
+import { createRateLimitMiddleware } from '../middleware/rateLimit.js'
 import {
   getFaceData, upsertFaceData, createAttemptToken, consumeAttemptToken, getRegulation,
 } from '../repo.js'
@@ -17,6 +18,11 @@ import { pushAudit } from '../helpers.js'
 import { processPunch } from '../engines/attendance.js'
 
 export const faceRouter = Router()
+const faceVerifyRateLimit = createRateLimitMiddleware({
+  windowMs: Number(process.env.FACE_VERIFY_RATE_LIMIT_WINDOW_MS) || 60_000,
+  maxAttempts: Number(process.env.FACE_VERIFY_RATE_LIMIT_MAX) || 10,
+  key: (request) => `${request.ip}:${(request as AuthedRequest).user?.id ?? 'anonymous'}`,
+})
 const FACE_SELF_PERMISSION = 'face.manage.self'
 
 // Ngưỡng khớp nới lỏng (0.6 → 0.7): cùng người đăng ký & chấm thường < 0.5, nhưng
@@ -95,7 +101,7 @@ faceRouter.get('/attempt', requireAuth, requirePermission(FACE_SELF_PERMISSION),
 })
 
 /* ------------------------------- /verify ---------------------------------- */
-faceRouter.post('/verify', requireAuth, requirePermission(FACE_SELF_PERMISSION), (req: AuthedRequest, res, next) => {
+faceRouter.post('/verify', requireAuth, requirePermission(FACE_SELF_PERMISSION), faceVerifyRateLimit, (req: AuthedRequest, res, next) => {
   try {
     const { descriptor, liveness, token, gps } = req.body ?? {}
     if (!token) throw httpError(400, 'Thiếu token phiên.')

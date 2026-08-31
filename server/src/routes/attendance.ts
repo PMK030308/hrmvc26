@@ -11,8 +11,15 @@ import { ATTENDANCE_PERMISSIONS, canProxyPunch } from '../authz/attendanceAuthor
 import { authenticateAttendanceDevice, createAttendanceDevice, revokeAttendanceDevice, rotateAttendanceDeviceCredential } from '../services/deviceAuthService.js'
 import { httpError } from '../types.js'
 import { getClientIp } from '../lib/clientIp.js'
+import { createRateLimitMiddleware } from '../middleware/rateLimit.js'
 
 export const attendanceRouter = Router()
+
+const devicePunchRateLimit = createRateLimitMiddleware({
+  windowMs: Number(process.env.DEVICE_PUNCH_RATE_LIMIT_WINDOW_MS) || 60_000,
+  maxAttempts: Number(process.env.DEVICE_PUNCH_RATE_LIMIT_MAX) || 120,
+  key: (request) => `${request.ip}:${request.header('X-Device-Id') ?? 'missing'}`,
+})
 
 attendanceRouter.get('/devices', requireAuth, requirePermission(ATTENDANCE_PERMISSIONS.DEVICE_MANAGE), (_req, res) => {
   res.json(db.prepare(`SELECT id, name, is_active isActive, created_at createdAt, updated_at updatedAt,
@@ -62,7 +69,7 @@ attendanceRouter.post('/punch', requireAuth, requirePermission(ATTENDANCE_PERMIS
 
 // Webhook máy chấm công vật lý (vân tay/khuôn mặt/thẻ từ) — ưu tiên nguồn vật lý (source=1).
 // Xác thực bằng header X-Device-Key (shared secret qua env DEVICE_KEY, mặc định "technova-device").
-attendanceRouter.post('/device-punch', (req, res, next) => {
+attendanceRouter.post('/device-punch', devicePunchRateLimit, (req, res, next) => {
   try {
     const device = authenticateAttendanceDevice(req.header('X-Device-Id') ?? undefined, req.header('X-Device-Key') ?? undefined)
     if (!device) { res.status(401).json({ status: 401, message: 'Thiết bị không hợp lệ.' }); return }
