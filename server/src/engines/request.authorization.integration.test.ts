@@ -30,6 +30,7 @@ const { canApproveCurrentStep, canManageRequestAttachment } = await import('../a
 const { default: express } = await import('express')
 const { default: jwt } = await import('jsonwebtoken')
 const { requestsRouter } = await import('../routes/requests.js')
+const { getPrimaryAttachmentStorage } = await import('../services/attachmentStorageRuntime.js')
 
 initSchema()
 runMigrations(db)
@@ -344,6 +345,7 @@ test('attachment routes hide the parent from outsiders and enforce separate uplo
     assert.equal(download.headers.get('x-content-type-options'), 'nosniff')
     assert.equal(download.headers.get('cache-control'), 'private, no-store')
     assert.equal(download.headers.get('cross-origin-resource-policy'), 'same-origin')
+    assert.equal(download.headers.get('content-security-policy'), "default-src 'none'; sandbox")
     assert.deepEqual(Buffer.from(await download.arrayBuffer()), Buffer.from([0]))
     const uploaded = await fetch(`${baseUrl}/late-earlies/attachment-route/attachments`, { method: 'POST', headers: ownerHeaders, body: uploadBody })
     assert.equal(uploaded.status, 200)
@@ -362,6 +364,13 @@ test('attachment routes hide the parent from outsiders and enforce separate uplo
     const storedDownload = await fetch(`${baseUrl}/attachments/${uploadedBody.id}/download`, { headers: ownerHeaders })
     assert.equal(storedDownload.status, 200)
     assert.deepEqual(Buffer.from(await storedDownload.arrayBuffer()), pdf)
+
+    await getPrimaryAttachmentStorage().delete(stored.storage_key)
+    const missingObject = await fetch(`${baseUrl}/attachments/${uploadedBody.id}/download`, { headers: ownerHeaders })
+    assert.equal(missingObject.status, 500)
+    const missingObjectBody = await missingObject.json() as { message: string }
+    assert.equal(missingObjectBody.message, 'Không thể đọc file đính kèm.')
+    assert.doesNotMatch(missingObjectBody.message, /attachments|ENOENT|hrm-request-authz/i)
 
     const malformed = JSON.stringify({ fileName: 'bad.pdf', fileSize: 1, mimeType: 'application/pdf', dataUrl: 'data:application/pdf;base64,***' })
     assert.equal((await fetch(`${baseUrl}/late-earlies/attachment-route/attachments`, { method: 'POST', headers: ownerHeaders, body: malformed })).status, 400)
