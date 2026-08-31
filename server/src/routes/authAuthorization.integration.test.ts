@@ -14,6 +14,7 @@ const { runMigrations } = await import('../services/migrationService.js')
 const { ensureDefaultRolePermissions } = await import('../services/permissionService.js')
 const { default: express } = await import('express')
 const { default: jwt } = await import('jsonwebtoken')
+const { default: bcrypt } = await import('bcryptjs')
 const { authRouter } = await import('./auth.js')
 const { configRouter } = await import('./config.js')
 
@@ -66,13 +67,50 @@ function insertUser(id: string, roles: string[]): void {
     .run(employeeId, id, id, `${id}@example.test`)
   db.prepare(`INSERT INTO users
     (id, email, employee_id, password_hash, roles, permissions, department_scopes, is_active)
-    VALUES (?, ?, ?, 'hash', ?, '["Delete"]', '[]', 1)`)
-    .run(id, `${id}@example.test`, employeeId, JSON.stringify(roles))
+    VALUES (?, ?, ?, ?, ?, '["Delete"]', '[]', 1)`)
+    .run(id, `${id}@example.test`, employeeId, bcrypt.hashSync('password123', 4), JSON.stringify(roles))
 }
 
 function token(id: string, roles: string[]): string {
-  return jwt.sign({ id, roles }, process.env.JWT_SECRET || 'hrm-attendance-dev-secret-change-me', { expiresIn: '1h' })
+  return jwt.sign({ id, roles, session_version: 1, token_type: 'access' }, process.env.JWT_SECRET || 'hrm-attendance-dev-secret-change-me', { expiresIn: '1h' })
 }
+
+test('protected routes reject missing and stale session versions but ignore authz-only changes', async () => {
+  const secret = process.env.JWT_SECRET || 'hrm-attendance-dev-secret-change-me'
+  const missingVersion = jwt.sign({ id: 'employee' }, secret, { expiresIn: '1h' })
+  assert.equal((await fetch(`${baseUrl}/auth/me`, { headers: { Authorization: `Bearer ${missingVersion}` } })).status, 401)
+
+  const current = token('employee', ['Employee'])
+  db.prepare("UPDATE users SET authz_version=authz_version+1 WHERE id='employee'").run()
+  assert.equal((await fetch(`${baseUrl}/auth/me`, { headers: { Authorization: `Bearer ${current}` } })).status, 200)
+
+  db.prepare("UPDATE users SET session_version=session_version+1 WHERE id='employee'").run()
+  assert.equal((await fetch(`${baseUrl}/auth/me`, { headers: { Authorization: `Bearer ${current}` } })).status, 401)
+})
+
+test('login issues access and refresh tokens and password change invalidates both old tokens', async () => {
+  db.prepare("UPDATE users SET session_version=1 WHERE id='employee'").run()
+  const login = await fetch(`${baseUrl}/auth/login`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: 'employee@example.test', password: 'password123' }),
+  })
+  assert.equal(login.status, 200)
+  const credentials = await login.json() as any
+  assert.equal((jwt.decode(credentials.token) as any).session_version, 1)
+  assert.equal((jwt.decode(credentials.refreshToken) as any).token_type, 'refresh')
+
+  const changed = await fetch(`${baseUrl}/auth/change-password`, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${credentials.token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ currentPassword: 'password123', newPassword: 'password456', confirmPassword: 'password456' }),
+  })
+  assert.equal(changed.status, 200)
+  assert.equal((db.prepare("SELECT session_version FROM users WHERE id='employee'").get() as any).session_version, 2)
+  assert.equal((await fetch(`${baseUrl}/auth/me`, { headers: { Authorization: `Bearer ${credentials.token}` } })).status, 401)
+  assert.equal((await fetch(`${baseUrl}/auth/refresh`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refreshToken: credentials.refreshToken }),
+  })).status, 401)
+})
 
 test('an existing token is rejected immediately after users.is_active becomes false', async () => {
   const existingToken = token('employee', ['Employee'])
