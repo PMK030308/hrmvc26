@@ -8,6 +8,7 @@ import { applyEmployeeStatusAuthorizationChange } from '../services/permissionSe
 import { pushAudit } from '../helpers.js'
 import { isoNow } from '../lib/date.js'
 import { truncateAndSeed } from '../seed.js'
+import { validateAvatarData } from '../services/mediaValidation.js'
 import { loadAuthorizationActor } from '../authz/authorizationActor.js'
 import {
   canCreateEmployeeInDepartment,
@@ -135,6 +136,7 @@ orgRouter.get('/employees/:id', requireAuth, (req: AuthedRequest, res, next) => 
 orgRouter.post('/employees', requireAuth, (req: AuthedRequest, res, next) => {
   try {
     const input = parseInput(createEmployeeSchema, req.body ?? {})
+    if (input.avatarData !== undefined) input.avatarData = validateAvatarData(input.avatarData)
     const create = db.transaction(() => {
       const actor = loadAuthorizationActor(req.user!.id)
       if (!canCreateEmployees(actor)) throw httpError(403, 'Bạn không có quyền tạo nhân viên.')
@@ -165,6 +167,7 @@ orgRouter.post('/employees', requireAuth, (req: AuthedRequest, res, next) => {
 orgRouter.put('/employees/:id', requireAuth, (req: AuthedRequest, res, next) => {
   try {
     const input = parseInput(updateEmployeeSchema, req.body ?? {}) as EmployeeUpdate
+    if (input.avatarData !== undefined) input.avatarData = validateAvatarData(input.avatarData)
     const update = db.transaction(() => {
       const actor = loadAuthorizationActor(req.user!.id)
       const employee = getEmployee(req.params.id)

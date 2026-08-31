@@ -6,6 +6,7 @@ import { requireAuth, requirePermission, type AuthedRequest } from '../middlewar
 import { getRegulation, mapRegulation, getEmployee, getUserById, mapUser, uid } from '../repo.js'
 import { httpError } from '../types.js'
 import { pushAudit } from '../helpers.js'
+import { validateAvatarData } from '../services/mediaValidation.js'
 import {
   getPermissionMatrixSnapshot, replacePermissionMatrix, updateAuthorizationUser, validateGenericPermissionMatrix,
   ALL_ROLES, type PermissionMatrixEntry,
@@ -223,7 +224,10 @@ configRouter.put('/profile', requireAuth, (req: AuthedRequest, res, next) => {
     const allowed = ['firstName', 'lastName', 'phone', 'address', 'maritalStatus', 'avatarData', 'dateOfBirth', 'gender']
     const colMap: Record<string, string> = { firstName: 'first_name', lastName: 'last_name', phone: 'phone', address: 'address', maritalStatus: 'marital_status', avatarData: 'avatar_data', dateOfBirth: 'date_of_birth', gender: 'gender' }
     const sets: string[] = [], vals: any[] = []
-    for (const k of allowed) if (k in req.body) { sets.push(`${colMap[k]}=?`); vals.push(req.body[k]) }
+    for (const k of allowed) if (k in req.body) {
+      sets.push(`${colMap[k]}=?`)
+      vals.push(k === 'avatarData' ? validateAvatarData(req.body[k]) : req.body[k])
+    }
     if ('firstName' in req.body || 'lastName' in req.body) {
       const fn = req.body.firstName ?? e.firstName, ln = req.body.lastName ?? e.lastName
       sets.push('full_name=?'); vals.push(`${ln} ${fn}`.trim())

@@ -37,7 +37,7 @@ app.use(cors({
     callback(new HttpError(403, 'Origin không được phép.'))
   },
 }))
-app.use(express.json({ limit: '12mb' })) // avatar/attachment base64
+app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '8mb' }))
 app.use(morgan('dev'))
 
 // Mount routes
@@ -65,6 +65,8 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
     res.status(err.status).json({ status: err.status, message: err.message, code: err.code, fieldErrors: err.fieldErrors })
   } else if (err?.type === 'entity.parse.failed') {
     res.status(400).json({ status: 400, message: 'JSON không hợp lệ.' })
+  } else if (err?.type === 'entity.too.large') {
+    res.status(413).json({ status: 413, message: 'Nội dung yêu cầu vượt quá giới hạn cho phép.' })
   } else {
     console.error('[UNHANDLED]', err)
     res.status(500).json({ status: 500, message: err?.message ?? 'Lỗi máy chủ.' })

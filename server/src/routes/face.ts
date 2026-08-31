@@ -63,7 +63,6 @@ faceRouter.get('/status', requireAuth, requirePermission(FACE_SELF_PERMISSION), 
     registeredAt: fd?.registeredAt ?? null,
   })
 })
-
 /* ------------------------------ /register --------------------------------- */
 faceRouter.post('/register', requireAuth, requirePermission(FACE_SELF_PERMISSION), (req: AuthedRequest, res, next) => {
   try {
