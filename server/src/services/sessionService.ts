@@ -33,6 +33,15 @@ export function createPasswordResetToken(
   return { token, expiresAt }
 }
 
+export function revokePasswordResetToken(
+  database: Database.Database,
+  token: string,
+  now: Date = new Date(),
+): void {
+  database.prepare(`UPDATE password_reset_tokens SET consumed_at=?
+    WHERE token_hash=? AND consumed_at IS NULL`).run(now.toISOString(), hashPasswordResetToken(token))
+}
+
 export function changePasswordAndInvalidateSessions(
   database: Database.Database,
   userId: string,

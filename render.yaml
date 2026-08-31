@@ -5,20 +5,61 @@
 #   1. Đăng nhập https://dashboard.render.com
 #   2. New (góc phải) → Blueprint → chọn repo GitHub "PMK030308/hrmvc26"
 #   3. Render tự đọc file này và tạo service "hrm-attendance-api".
-# Lưu ý: gói "free" có filesystem ephemeral → dữ liệu SQLite reset khi redeploy
-# (seed tự chạy lại, đủ dùng cho demo). Muốn dữ liệu cố định cần nâng plan + attach Disk.
+# Production blueprint fail-closed: paid persistent disk, one instance, no automatic deploy.
+# Backup flags stay manual until backup/restore has actually been verified.
 services:
   - type: web
     name: hrm-attendance-api
     runtime: node
     rootDir: server
-    plan: free
-    buildCommand: npm install --include=dev && npm run build
+    plan: starter
+    numInstances: 1
+    buildCommand: npm ci --include=dev && npm run build
     startCommand: npm start
     healthCheckPath: /api/health
-    autoDeploy: true
+    autoDeploy: false
+    disk:
+      name: hrm-production-data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 1
     envVars:
+      - key: NODE_ENV
+        value: production
       - key: NODE_VERSION
         value: "22"
       - key: JWT_SECRET
-        generateValue: true   # Render tự sinh secret ngẫu nhiên, không hardcode
+        generateValue: true
+      - key: CORS_ORIGINS
+        sync: false
+      - key: TRUST_PROXY
+        value: "1"
+      - key: HRM_DB_PATH
+        value: /opt/render/project/src/data/hrm.db
+      - key: DATABASE_PERSISTENT_VOLUME
+        value: "true"
+      - key: DATABASE_BACKUP_CONFIRMED
+        sync: false
+      - key: ATTACHMENT_STORAGE_PROVIDER
+        value: local
+      - key: ATTACHMENT_STORAGE_ROOT
+        value: /opt/render/project/src/data
+      - key: ATTACHMENT_STORAGE_PERSISTENT_VOLUME
+        value: "true"
+      - key: ATTACHMENT_STORAGE_BACKUP_CONFIRMED
+        sync: false
+      - key: PASSWORD_RESET_DELIVERY_PROVIDER
+        value: webhook
+      - key: PASSWORD_RESET_WEBHOOK_URL
+        sync: false
+      - key: PASSWORD_RESET_WEBHOOK_BEARER_TOKEN
+        generateValue: true
+      - key: PASSWORD_RESET_PUBLIC_URL
+        sync: false
+      - key: RETENTION_SCHEDULER_ENABLED
+        value: "true"
+      - key: RETENTION_SCHEDULER_INITIAL_DELAY_MS
+        value: "300000"
+      - key: RETENTION_SCHEDULER_INTERVAL_MS
+        value: "86400000"
+      - key: RETENTION_SCHEDULER_BATCH_SIZE
+        value: "100"

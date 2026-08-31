@@ -6,6 +6,8 @@ import { useAuthStore } from '@/stores/authStore'
 
 // Auth
 import LoginPage from '@/pages/auth/LoginPage'
+import ForgotPasswordPage from '@/pages/auth/ForgotPasswordPage'
+import ResetPasswordPage from '@/pages/auth/ResetPasswordPage'
 // Employee
 import EmployeeHome from '@/pages/employee/Home'
 import AttendancePage from '@/pages/employee/Attendance'
@@ -61,6 +63,8 @@ export const router = createBrowserRouter([
     path: '/login',
     element: <GuestOnly><LoginPage /></GuestOnly>,
   },
+  { path: '/forgot-password', element: <GuestOnly><ForgotPasswordPage /></GuestOnly> },
+  { path: '/reset-password', element: <GuestOnly><ResetPasswordPage /></GuestOnly> },
 
   /* ----------------------------- Cổng nhân viên ---------------------------- */
   {

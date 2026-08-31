@@ -141,3 +141,31 @@ npm run retention:cleanup -- audit-security --apply --batch-size=100
 - Hệ thống hiện không lưu face-attempt capture riêng hay chatbot conversation metadata, nên không xóa `employee_face_data`; chatbot business mutation vẫn nằm trong audit 2 năm.
 - Mỗi cleanup category có lease, bounded batch và bản ghi `retention_cleanup_runs` không chứa payload nhạy cảm.
 - Production CORS chỉ chấp nhận exact HTTPS origins. `TRUST_PROXY=false` khi Node nhận traffic trực tiếp; chỉ dùng `1` khi có đúng một reverse proxy do mình kiểm soát và proxy ghi đè `X-Forwarded-For`.
+
+## 9. Production preflight
+
+Backend production sẽ fail startup nếu thiếu persistent DB/storage, backup confirmation, exact CORS, password-reset webhook hoặc retention scheduler. Production DB trống cũng bị từ chối thay vì tự seed demo.
+
+Chỉ đặt hai biến sau thành `true` sau khi đã tạo backup độc lập và restore rehearsal thành công:
+
+```bash
+DATABASE_BACKUP_CONFIRMED=true
+ATTACHMENT_STORAGE_BACKUP_CONFIRMED=true
+```
+
+Sau migration, chạy preflight read-only trên đúng persistent volume:
+
+```bash
+npm run production:preflight
+```
+
+Preflight phải trả:
+
+- `integrity: ok`;
+- `foreignKeyErrors: 0`;
+- không có pending migration;
+- employee/user count lớn hơn 0;
+- migration checksum không drift;
+- attachment root đọc/ghi được.
+
+Không dùng `autoDeploy` cho rollout migration nhạy cảm. Render Blueprint hiện để một instance vì SQLite/persistent disk không phù hợp horizontal write scaling. Retention chạy trong web process sau initial delay và mỗi category chỉ xử lý một bounded batch.

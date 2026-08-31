@@ -3,6 +3,7 @@
 // Thay thế mock `run()`. Giữ shape lỗi: ApiError kế thừa Error (e.message dùng được).
 // ============================================================================
 import axios, { type InternalAxiosRequestConfig } from 'axios'
+import { resolveApiBase } from '@/lib/runtimeConfig'
 
 const TOKEN_KEY = 'hrm-token'
 const REFRESH_TOKEN_KEY = 'hrm-refresh-token'
@@ -26,20 +27,13 @@ export class ApiError extends Error {
 //   - 'https://...onrender.com'           → '.../api'     (env set thiếu /api)
 //   - 'https://...onrender.com/api'        → '.../api'     (env set đúng)
 //   - 'https://...onrender.com/api/'       → '.../api'     (có dấu / cuối)
-function apiBase(raw: string): string {
-  const clean = raw.replace(/\/+$/, '') // bỏ dấu / ở cuối
-  return clean.endsWith('/api') ? clean : `${clean}/api`
-}
-
-const RAW_BASE =
-  import.meta.env.VITE_API_URL ||
-  (import.meta.env.PROD ? 'https://hrm-attendance-api.onrender.com/api' : '/api')
+const API_BASE = resolveApiBase(import.meta.env.VITE_API_URL, import.meta.env.PROD)
 
 export const http = axios.create({
   // Dev: '/api' → Vite proxy → backend :4000 (xem vite.config.ts).
   // Production: ưu tiên env VITE_API_URL; nếu chưa set thì dùng backend Render thật.
   //   (Vite proxy KHÔNG chạy ở bản build tĩnh, nên '/api' sẽ 404 → phải có URL thật.)
-  baseURL: apiBase(RAW_BASE),
+  baseURL: API_BASE,
   timeout: 30_000,
 })
 
@@ -49,7 +43,7 @@ async function refreshAccessToken(): Promise<string> {
   const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY)
   if (!refreshToken) throw new Error('Missing refresh token')
   const response = await axios.post<{ token: string; refreshToken: string }>(
-    `${apiBase(RAW_BASE)}/auth/refresh`, { refreshToken }, { timeout: 30_000 },
+    `${API_BASE}/auth/refresh`, { refreshToken }, { timeout: 30_000 },
   )
   localStorage.setItem(TOKEN_KEY, response.data.token)
   localStorage.setItem(REFRESH_TOKEN_KEY, response.data.refreshToken)

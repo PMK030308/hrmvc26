@@ -10,7 +10,8 @@ import { validatePasswordChange } from '../lib/profile.js'
 import { loadAuthorizationActor } from '../authz/authorizationActor.js'
 import { getPermissionMatrixSnapshot } from '../services/permissionService.js'
 import { createRateLimitMiddleware } from '../middleware/rateLimit.js'
-import { changePasswordAndInvalidateSessions, createPasswordResetToken, resetPasswordWithToken } from '../services/sessionService.js'
+import { changePasswordAndInvalidateSessions, createPasswordResetToken, resetPasswordWithToken, revokePasswordResetToken } from '../services/sessionService.js'
+import { deliverPasswordReset, resolvePasswordResetDeliveryConfig } from '../services/passwordResetDelivery.js'
 
 export const authRouter = Router()
 
@@ -75,7 +76,14 @@ authRouter.post('/forgot-password', forgotPasswordRateLimit, (req, res) => {
   let developmentResetToken: string | undefined
   if (row) {
     const issued = createPasswordResetToken(db, row.id)
-    if (process.env.NODE_ENV !== 'production' && process.env.PASSWORD_RESET_EXPOSE_TOKEN === 'true') {
+    const deliveryConfig = resolvePasswordResetDeliveryConfig(process.env)
+    if (deliveryConfig.provider === 'webhook') {
+      void deliverPasswordReset(deliveryConfig, { email, token: issued.token, expiresAt: issued.expiresAt })
+        .catch(() => {
+          revokePasswordResetToken(db, issued.token)
+          console.error('[PASSWORD_RESET_DELIVERY_FAILED]')
+        })
+    } else if (process.env.NODE_ENV !== 'production' && process.env.PASSWORD_RESET_EXPOSE_TOKEN === 'true') {
       developmentResetToken = issued.token
     }
   }

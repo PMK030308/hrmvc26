@@ -26,9 +26,12 @@ import { ensureDefaultRolePermissions } from './services/permissionService.js'
 import { runMigrations } from './services/migrationService.js'
 import { isCorsOriginAllowed, resolveSecurityConfig } from './lib/securityConfig.js'
 import { getPrimaryAttachmentStorage } from './services/attachmentStorageRuntime.js'
+import { assertProductionReadiness } from './lib/productionReadiness.js'
+import { startRetentionScheduler } from './services/retentionScheduler.js'
 
 const app = express()
 const PORT = Number(process.env.PORT) || 4000
+assertProductionReadiness(process.env)
 const securityConfig = resolveSecurityConfig(process.env)
 getPrimaryAttachmentStorage()
 
@@ -59,7 +62,16 @@ app.use('/api/audit', auditRouter)
 app.use('/api/delegation', delegationRouter)
 app.use('/api/chatbot', chatbotRouter)
 
-app.get('/api/health', (_req, res) => res.json({ ok: true, ts: new Date().toISOString() }))
+app.get('/api/health/live', (_req, res) => res.json({ ok: true }))
+app.get('/api/health', (_req, res) => {
+  try {
+    db.prepare('SELECT 1').get()
+    const migration = db.prepare('SELECT MAX(version) version FROM schema_migrations').get() as any
+    res.json({ ok: true, database: 'ok', schemaVersion: Number(migration?.version ?? 0), ts: new Date().toISOString() })
+  } catch {
+    res.status(503).json({ ok: false, database: 'error', ts: new Date().toISOString() })
+  }
+})
 
 // Error handler统一 — envelope { status, message, code?, fieldErrors? }
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
@@ -79,12 +91,16 @@ initSchema()
 runMigrations(db)
 ensureDefaultRolePermissions()
 // Seed tự động nếu DB trống (lần khởi động đầu)
+if ((db.prepare('SELECT COUNT(*) c FROM employees').get() as any).c === 0 && process.env.NODE_ENV === 'production') {
+  throw new Error('Database production đang trống; từ chối tự động seed tài khoản demo.')
+}
 if ((db.prepare('SELECT COUNT(*) c FROM employees').get() as any).c === 0) {
   console.log('  ℹ️  DB trống — tự động seed dữ liệu mẫu...')
   seed()
 }
+startRetentionScheduler(db, process.env)
 
 app.listen(PORT, () => {
   console.log(`\n  ✅ HRM backend chạy tại http://localhost:${PORT}/api`)
-  console.log(`     Đăng nhập demo: admin@technova.vn / 123456\n`)
+  if (process.env.NODE_ENV !== 'production') console.log(`     Đăng nhập demo: admin@technova.vn / 123456\n`)
 })

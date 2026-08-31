@@ -4,14 +4,34 @@
 // Múi giờ VN (UTC+7): punched_at lưu TEXT naive 'YYYY-MM-DDTHH:mm:ss' (giờ VN).
 // ============================================================================
 import Database from 'better-sqlite3'
-import { mkdirSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
+import { accessSync, constants, mkdirSync, statSync } from 'node:fs'
+import { dirname, isAbsolute, resolve } from 'node:path'
 
 const DB_PATH = resolve(process.cwd(), 'server/data/hrm.db')
 // Cho phép chạy từ trong thư mục server hoặc từ project root; test có thể trỏ sang DB tạm biệt lập.
 const defaultPath = process.cwd().endsWith('server') ? resolve('data/hrm.db') : DB_PATH
+if (process.env.NODE_ENV === 'production') {
+  if (!process.env.HRM_DB_PATH || !isAbsolute(process.env.HRM_DB_PATH)) {
+    throw new Error('HRM_DB_PATH phải là đường dẫn tuyệt đối trong production.')
+  }
+  if (process.env.DATABASE_PERSISTENT_VOLUME?.toLowerCase() !== 'true') {
+    throw new Error('Production SQLite cần persistent volume.')
+  }
+  if (process.env.DATABASE_BACKUP_CONFIRMED?.toLowerCase() !== 'true') {
+    throw new Error('Production SQLite cần backup và restore đã được xác nhận.')
+  }
+}
 const finalPath = process.env.HRM_DB_PATH ? resolve(process.env.HRM_DB_PATH) : defaultPath
-mkdirSync(dirname(finalPath), { recursive: true })
+if (process.env.NODE_ENV === 'production') {
+  const parent = dirname(finalPath)
+  let info
+  try { info = statSync(parent) } catch { throw new Error('Thư mục database production không tồn tại.') }
+  if (!info.isDirectory()) throw new Error('Thư mục database production không hợp lệ.')
+  try { accessSync(parent, constants.R_OK | constants.W_OK) }
+  catch { throw new Error('Thư mục database production phải có quyền đọc và ghi.') }
+} else {
+  mkdirSync(dirname(finalPath), { recursive: true })
+}
 
 export const db = new Database(finalPath)
 db.pragma('journal_mode = WAL')

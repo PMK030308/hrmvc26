@@ -114,7 +114,7 @@ export default function LoginPage() {
             </div>
             <div className="flex items-center justify-between text-sm">
               <label className="flex items-center gap-2 text-slate-600"><input type="checkbox" className="rounded border-slate-300 text-brand-600 focus:ring-brand-500" defaultChecked /> Ghi nhớ</label>
-              <button type="button" onClick={() => toast.info('Liên hệ HR để đặt lại mật khẩu (demo).')} className="font-medium text-brand-600 hover:underline">Quên mật khẩu?</button>
+              <button type="button" onClick={() => navigate('/forgot-password')} className="font-medium text-brand-600 hover:underline">Quên mật khẩu?</button>
             </div>
             <Button type="submit" loading={loading} className="w-full" size="lg" icon={<ArrowRight className="h-4 w-4" />}>
               Đăng nhập

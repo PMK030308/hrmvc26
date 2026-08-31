@@ -14,6 +14,11 @@ export interface MigrationResult {
   appliedVersions: number[]
 }
 
+export interface MigrationState {
+  appliedVersions: number[]
+  pendingVersions: number[]
+}
+
 function checksum(migration: SchemaMigration): string {
   // Repository checkout line endings must not change the identity of an immutable migration.
   const normalizedSource = migration.checksumSource.replace(/\r\n?/g, '\n')
@@ -34,6 +39,30 @@ function validateMigrations(migrations: readonly SchemaMigration[]): void {
     versions.add(migration.version)
     previous = migration.version
   }
+}
+
+export function inspectMigrationState(
+  database: Database.Database,
+  migrations: readonly SchemaMigration[] = SCHEMA_MIGRATIONS,
+): MigrationState {
+  validateMigrations(migrations)
+  const ledgerExists = (database.prepare(`SELECT COUNT(*) count FROM sqlite_master
+    WHERE type='table' AND name='schema_migrations'`).get() as any).count === 1
+  if (!ledgerExists) return { appliedVersions: [], pendingVersions: migrations.map((migration) => migration.version) }
+  const appliedVersions: number[] = []
+  const pendingVersions: number[] = []
+  for (const migration of migrations) {
+    const applied = database.prepare('SELECT name, checksum FROM schema_migrations WHERE version=?').get(migration.version) as any
+    if (!applied) {
+      pendingVersions.push(migration.version)
+      continue
+    }
+    if (applied.name !== migration.name || applied.checksum !== checksum(migration)) {
+      throw new Error(`Migration checksum mismatch ở version ${migration.version}.`)
+    }
+    appliedVersions.push(migration.version)
+  }
+  return { appliedVersions, pendingVersions }
 }
 
 export function runMigrations(
