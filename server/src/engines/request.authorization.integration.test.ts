@@ -9,6 +9,7 @@ import type { HttpError } from '../types.js'
 
 const directory = mkdtempSync(join(tmpdir(), 'hrm-request-authz-'))
 process.env.HRM_DB_PATH = join(directory, 'integration.db')
+process.env.ATTACHMENT_STORAGE_ROOT = join(directory, 'attachments')
 
 const { db, initSchema, truncateAll } = await import('../db.js')
 const { runMigrations } = await import('../services/migrationService.js')
@@ -37,6 +38,7 @@ ensureDefaultRolePermissions()
 after(() => {
   db.close()
   delete process.env.HRM_DB_PATH
+  delete process.env.ATTACHMENT_STORAGE_ROOT
   rmSync(directory, { recursive: true, force: true })
 })
 
@@ -296,7 +298,7 @@ test('attachment routes hide the parent from outsiders and enforce separate uplo
   insertRequest({ id: 'attachment-route', status: 1 })
   db.prepare(`INSERT INTO request_attachments
     (id, request_id, file_name, file_size, mime_type, data_url, uploaded_at)
-    VALUES ('attachment-existing', 'attachment-route', 'proof.pdf', 12, 'application/pdf', 'data:application/pdf;base64,AA==', '2026-08-29T09:00:00')`).run()
+    VALUES ('attachment-existing', 'attachment-route', 'proof.pdf', 1, 'application/pdf', 'data:application/pdf;base64,AA==', '2026-08-29T09:00:00')`).run()
   const app = express()
   app.use(express.json({ limit: '1mb' }))
   app.use('/api/requests', requestsRouter)
@@ -335,14 +337,27 @@ test('attachment routes hide the parent from outsiders and enforce separate uplo
     assert.equal(download.status, 200)
     assert.equal(download.headers.get('content-type'), 'application/pdf')
     assert.match(download.headers.get('content-disposition') ?? '', /attachment; filename="proof.pdf"/)
+    assert.equal(download.headers.get('x-content-type-options'), 'nosniff')
+    assert.equal(download.headers.get('cache-control'), 'private, no-store')
+    assert.equal(download.headers.get('cross-origin-resource-policy'), 'same-origin')
     assert.deepEqual(Buffer.from(await download.arrayBuffer()), Buffer.from([0]))
     const uploaded = await fetch(`${baseUrl}/late-earlies/attachment-route/attachments`, { method: 'POST', headers: ownerHeaders, body: uploadBody })
     assert.equal(uploaded.status, 200)
     const uploadedBody = await uploaded.json() as any
     assert.equal(uploadedBody.uploadedByUserId, 'user-owner')
     assert.equal(uploadedBody.checksumSha256, createHash('sha256').update(pdf).digest('hex'))
-    const stored = db.prepare('SELECT file_size, uploaded_by_user_id, checksum_sha256 FROM request_attachments WHERE id=?').get(uploadedBody.id) as any
-    assert.deepEqual(stored, { file_size: pdf.length, uploaded_by_user_id: 'user-owner', checksum_sha256: uploadedBody.checksumSha256 })
+    const stored = db.prepare(`SELECT file_size, uploaded_by_user_id, checksum_sha256, data_url, storage_provider, storage_key
+      FROM request_attachments WHERE id=?`).get(uploadedBody.id) as any
+    assert.equal(stored.file_size, pdf.length)
+    assert.equal(stored.uploaded_by_user_id, 'user-owner')
+    assert.equal(stored.checksum_sha256, uploadedBody.checksumSha256)
+    assert.equal(stored.data_url, '')
+    assert.equal(stored.storage_provider, 'local')
+    assert.match(stored.storage_key, new RegExp(`^request-attachments/${uploadedBody.id}/[a-f0-9]{64}$`))
+
+    const storedDownload = await fetch(`${baseUrl}/attachments/${uploadedBody.id}/download`, { headers: ownerHeaders })
+    assert.equal(storedDownload.status, 200)
+    assert.deepEqual(Buffer.from(await storedDownload.arrayBuffer()), pdf)
 
     const malformed = JSON.stringify({ fileName: 'bad.pdf', fileSize: 1, mimeType: 'application/pdf', dataUrl: 'data:application/pdf;base64,***' })
     assert.equal((await fetch(`${baseUrl}/late-earlies/attachment-route/attachments`, { method: 'POST', headers: ownerHeaders, body: malformed })).status, 400)
