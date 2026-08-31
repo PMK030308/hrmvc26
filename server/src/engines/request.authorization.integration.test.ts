@@ -273,6 +273,8 @@ test('request list honors the dynamic view matrix and invalid or expired JWT ret
     roles: ['Employee'],
     permissions: [],
     departmentScopes: [],
+    session_version: 1,
+    token_type: 'access',
   }
   const token = jwt.sign(authUser, process.env.JWT_SECRET || 'hrm-attendance-dev-secret-change-me', { expiresIn: '1h' })
   const expiredToken = jwt.sign(authUser, process.env.JWT_SECRET || 'hrm-attendance-dev-secret-change-me', { expiresIn: -1 })
@@ -314,11 +316,11 @@ test('attachment routes hide the parent from outsiders and enforce separate uplo
   const secret = process.env.JWT_SECRET || 'hrm-attendance-dev-secret-change-me'
   const ownerToken = jwt.sign({
     id: 'user-owner', email: 'user-owner@example.test', employeeId: 'employee-owner',
-    roles: ['Employee'], permissions: [], departmentScopes: [],
+    roles: ['Employee'], permissions: [], departmentScopes: [], session_version: 1, token_type: 'access',
   }, secret, { expiresIn: '1h' })
   const outsiderToken = jwt.sign({
     id: 'user-other', email: 'user-other@example.test', employeeId: 'employee-other',
-    roles: ['Employee'], permissions: [], departmentScopes: [],
+    roles: ['Employee'], permissions: [], departmentScopes: [], session_version: 1, token_type: 'access',
   }, secret, { expiresIn: '1h' })
   const pdf = Buffer.from('%PDF-1.4')
   const uploadBody = JSON.stringify({

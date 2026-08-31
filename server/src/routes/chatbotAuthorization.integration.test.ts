@@ -64,7 +64,7 @@ beforeEach(() => {
 })
 
 function auth(): Record<string, string> {
-  const token = jwt.sign({ id: 'user', roles: ['Admin'] }, process.env.JWT_SECRET || 'hrm-attendance-dev-secret-change-me', { expiresIn: '1h' })
+  const token = jwt.sign({ id: 'user', roles: ['Admin'], session_version: 1, token_type: 'access' }, process.env.JWT_SECRET || 'hrm-attendance-dev-secret-change-me', { expiresIn: '1h' })
   return { Authorization: `Bearer ${token}` }
 }
 

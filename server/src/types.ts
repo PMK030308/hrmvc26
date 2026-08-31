@@ -44,4 +44,5 @@ export interface AuthUser {
   departmentScopes: string[]
   isActive?: boolean
   authorizationVersion?: number
+  sessionVersion?: number
 }

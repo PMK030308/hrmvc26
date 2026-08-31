@@ -23,6 +23,8 @@ export interface AuthorizationActor {
   isActive: true
   /** Revision for conflict detection/capability refresh; authority is still loaded DB-fresh per request. */
   authorizationVersion: number
+  /** Authentication-session revision. Tokens must match this DB-fresh value. */
+  sessionVersion: number
 }
 
 export function loadAuthorizationActor(userId: string): AuthorizationActor {
@@ -61,6 +63,7 @@ export function loadAuthorizationActor(userId: string): AuthorizationActor {
     legacyPermissions: jsonArray(row.permissions),
     isActive: true,
     authorizationVersion: Number(row.authz_version ?? 1),
+    sessionVersion: Number(row.session_version ?? 1),
   }
 }
 

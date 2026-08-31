@@ -93,7 +93,7 @@ function insertUser(id: string, roles: string[], departmentId: string, scopes: s
 
 function auth(id: string): Record<string, string> {
   const secret = process.env.JWT_SECRET || 'hrm-attendance-dev-secret-change-me'
-  return { Authorization: `Bearer ${jwt.sign({ id, roles: ['Admin'] }, secret, { expiresIn: '1h' })}` }
+  return { Authorization: `Bearer ${jwt.sign({ id, roles: ['Admin'], session_version: 1, token_type: 'access' }, secret, { expiresIn: '1h' })}` }
 }
 
 function setPermission(role: string, permission: string, allowed: boolean): void {

@@ -90,7 +90,7 @@ function insertUserForEmployee(id: string, roles: string[], employeeId: string, 
 }
 
 function token(id: string): string {
-  return jwt.sign({ id, roles: ['Admin'] }, process.env.JWT_SECRET || 'hrm-attendance-dev-secret-change-me', { expiresIn: '1h' })
+  return jwt.sign({ id, roles: ['Admin'], session_version: 1, token_type: 'access' }, process.env.JWT_SECRET || 'hrm-attendance-dev-secret-change-me', { expiresIn: '1h' })
 }
 
 function auth(id: string): Record<string, string> {

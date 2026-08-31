@@ -60,7 +60,7 @@ beforeEach(() => {
 })
 
 function token(): string {
-  return jwt.sign({ id: 'admin', roles: ['Admin'] }, process.env.JWT_SECRET || 'hrm-attendance-dev-secret-change-me', { expiresIn: '1h' })
+  return jwt.sign({ id: 'admin', roles: ['Admin'], session_version: 1, token_type: 'access' }, process.env.JWT_SECRET || 'hrm-attendance-dev-secret-change-me', { expiresIn: '1h' })
 }
 
 function setPermission(allowed: boolean): void {

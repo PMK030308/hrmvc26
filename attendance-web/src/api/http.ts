@@ -2,9 +2,10 @@
 // HTTP client (axios) — gọi backend thật tại /api (proxy Vite → :4000).
 // Thay thế mock `run()`. Giữ shape lỗi: ApiError kế thừa Error (e.message dùng được).
 // ============================================================================
-import axios from 'axios'
+import axios, { type InternalAxiosRequestConfig } from 'axios'
 
 const TOKEN_KEY = 'hrm-token'
+const REFRESH_TOKEN_KEY = 'hrm-refresh-token'
 
 /** Lỗi API — kế thừa Error để các catch (e) => toast.error(e.message) hoạt động y nguyên. */
 export class ApiError extends Error {
@@ -42,6 +43,19 @@ export const http = axios.create({
   timeout: 30_000,
 })
 
+let refreshPromise: Promise<string> | null = null
+
+async function refreshAccessToken(): Promise<string> {
+  const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY)
+  if (!refreshToken) throw new Error('Missing refresh token')
+  const response = await axios.post<{ token: string; refreshToken: string }>(
+    `${apiBase(RAW_BASE)}/auth/refresh`, { refreshToken }, { timeout: 30_000 },
+  )
+  localStorage.setItem(TOKEN_KEY, response.data.token)
+  localStorage.setItem(REFRESH_TOKEN_KEY, response.data.refreshToken)
+  return response.data.token
+}
+
 // Gắn token
 http.interceptors.request.use((config) => {
   const token = localStorage.getItem(TOKEN_KEY)
@@ -52,12 +66,24 @@ http.interceptors.request.use((config) => {
 // Map lỗi → ApiError
 http.interceptors.response.use(
   (resp) => resp,
-  (error) => {
+  async (error) => {
     if (error.response) {
       const { status, data } = error.response
       const message = data?.message ?? `Lỗi ${status}`
-      // 401 → xoá token để authStore bootstrap đăng xuất
-      if (status === 401) localStorage.removeItem(TOKEN_KEY)
+      const request = error.config as (InternalAxiosRequestConfig & { _sessionRefreshAttempted?: boolean }) | undefined
+      if (status === 401 && request && !request._sessionRefreshAttempted && !String(request.url).includes('/auth/refresh')) {
+        request._sessionRefreshAttempted = true
+        try {
+          refreshPromise ??= refreshAccessToken().finally(() => { refreshPromise = null })
+          const token = await refreshPromise
+          request.headers.Authorization = `Bearer ${token}`
+          return http.request(request)
+        } catch { /* clear the invalid session below */ }
+      }
+      if (status === 401) {
+        localStorage.removeItem(TOKEN_KEY)
+        localStorage.removeItem(REFRESH_TOKEN_KEY)
+      }
       return Promise.reject(new ApiError(status, message, data?.code, data?.fieldErrors))
     }
     // Lỗi mạng / timeout

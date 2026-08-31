@@ -6,7 +6,7 @@ import { runRetentionCleanup } from './retentionService.js'
 function database(): Database.Database {
   const db = new Database(':memory:')
   db.exec(`
-    CREATE TABLE audit_logs (id TEXT PRIMARY KEY, retention_class TEXT NOT NULL, created_at TEXT NOT NULL);
+    CREATE TABLE audit_logs (id TEXT PRIMARY KEY, entity TEXT NOT NULL, retention_class TEXT NOT NULL, created_at TEXT NOT NULL);
     CREATE TABLE face_attempt_tokens (id TEXT PRIMARY KEY, created_at TEXT NOT NULL);
     CREATE TABLE retention_cleanup_runs (
       id TEXT PRIMARY KEY, category TEXT NOT NULL, dry_run INTEGER NOT NULL, cutoff_at TEXT NOT NULL,
@@ -20,9 +20,9 @@ function database(): Database.Database {
 
 test('retention cleanup honors category boundaries and dry-run does not mutate rows', () => {
   const db = database()
-  db.prepare('INSERT INTO audit_logs VALUES (?, ?, ?)').run('security-old', 'security', '2025-08-30T23:59:59.999Z')
-  db.prepare('INSERT INTO audit_logs VALUES (?, ?, ?)').run('security-boundary', 'security', '2025-08-31T00:00:00.000Z')
-  db.prepare('INSERT INTO audit_logs VALUES (?, ?, ?)').run('business-young', 'business', '2025-08-30T23:59:59.999Z')
+  db.prepare('INSERT INTO audit_logs VALUES (?, ?, ?, ?)').run('security-old', 'session', 'security', '2025-08-30T23:59:59.999Z')
+  db.prepare('INSERT INTO audit_logs VALUES (?, ?, ?, ?)').run('security-boundary', 'session', 'security', '2025-08-31T00:00:00.000Z')
+  db.prepare('INSERT INTO audit_logs VALUES (?, ?, ?, ?)').run('business-young', 'Request', 'business', '2025-08-30T23:59:59.999Z')
   const result = runRetentionCleanup(db, { category: 'audit-security', now: new Date('2026-08-31T00:00:00.000Z'), dryRun: true, batchSize: 10 })
   assert.deepEqual({ scanned: result.scanned, deleted: result.deleted }, { scanned: 1, deleted: 0 })
   assert.equal((db.prepare('SELECT COUNT(*) count FROM audit_logs').get() as any).count, 3)

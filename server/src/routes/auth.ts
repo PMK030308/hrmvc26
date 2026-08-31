@@ -2,7 +2,7 @@
 import { Router } from 'express'
 import bcrypt from 'bcryptjs'
 import { db } from '../db.js'
-import { signToken, requireAuth, type AuthedRequest } from '../middleware/auth.js'
+import { signToken, signRefreshToken, verifyRefreshToken, requireAuth, type AuthedRequest } from '../middleware/auth.js'
 import { getUserByEmail, mapUser, getUserById } from '../repo.js'
 import { httpError } from '../types.js'
 import { pushAudit } from '../helpers.js'
@@ -10,6 +10,7 @@ import { validatePasswordChange } from '../lib/profile.js'
 import { loadAuthorizationActor } from '../authz/authorizationActor.js'
 import { getPermissionMatrixSnapshot } from '../services/permissionService.js'
 import { createRateLimitMiddleware } from '../middleware/rateLimit.js'
+import { changePasswordAndInvalidateSessions, createPasswordResetToken, resetPasswordWithToken } from '../services/sessionService.js'
 
 export const authRouter = Router()
 
@@ -21,6 +22,10 @@ const loginRateLimit = createRateLimitMiddleware({
 const forgotPasswordRateLimit = createRateLimitMiddleware({
   windowMs: Number(process.env.FORGOT_PASSWORD_RATE_LIMIT_WINDOW_MS) || 60 * 60 * 1000,
   maxAttempts: Number(process.env.FORGOT_PASSWORD_RATE_LIMIT_MAX) || 5,
+})
+const refreshTokenRateLimit = createRateLimitMiddleware({
+  windowMs: Number(process.env.REFRESH_RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
+  maxAttempts: Number(process.env.REFRESH_RATE_LIMIT_MAX) || 30,
 })
 
 authRouter.post('/login', loginRateLimit, (req, res, next) => {
@@ -38,8 +43,9 @@ authRouter.post('/login', loginRateLimit, (req, res, next) => {
       permissionMatrixVersion: getPermissionMatrixSnapshot().version,
     }
     const token = signToken(user)
+    const refreshToken = signRefreshToken(user)
     pushAudit(user.id, user.email, 4, 'session', null, 'Đăng nhập hệ thống')
-    res.json({ token, user })
+    res.json({ token, refreshToken, user })
   } catch (e) { next(e) }
 })
 
@@ -64,8 +70,49 @@ authRouter.get('/me', requireAuth, (req: AuthedRequest, res, next) => {
 })
 
 authRouter.post('/forgot-password', forgotPasswordRateLimit, (req, res) => {
-  const { email } = req.body ?? {}
-  res.json({ ok: true, message: `Đường link đặt lại mật khẩu đã được gửi đến ${email} (demo).` })
+  const email = String(req.body?.email ?? '').trim()
+  const row = email ? db.prepare('SELECT id FROM users WHERE LOWER(email)=LOWER(?) AND is_active=1').get(email) as any : null
+  let developmentResetToken: string | undefined
+  if (row) {
+    const issued = createPasswordResetToken(db, row.id)
+    if (process.env.NODE_ENV !== 'production' && process.env.PASSWORD_RESET_EXPOSE_TOKEN === 'true') {
+      developmentResetToken = issued.token
+    }
+  }
+  res.json({
+    ok: true,
+    message: 'Nếu tài khoản tồn tại, hướng dẫn đặt lại mật khẩu sẽ được gửi.',
+    ...(developmentResetToken ? { developmentResetToken } : {}),
+  })
+})
+
+authRouter.post('/refresh', refreshTokenRateLimit, (req, res, next) => {
+  try {
+    const verified = verifyRefreshToken(String(req.body?.refreshToken ?? ''))
+    const user = getUserById(verified.id)
+    if (!user) throw httpError(401, 'Refresh token không hợp lệ hoặc đã hết hạn.')
+    res.json({ token: signToken(user), refreshToken: signRefreshToken(user) })
+  } catch { next(httpError(401, 'Refresh token không hợp lệ hoặc đã hết hạn.')) }
+})
+
+authRouter.post('/reset-password', forgotPasswordRateLimit, (req, res, next) => {
+  try {
+    const token = String(req.body?.token ?? '')
+    const newPassword = String(req.body?.newPassword ?? '')
+    const confirmPassword = String(req.body?.confirmPassword ?? '')
+    if (!token) throw httpError(400, 'Token đặt lại mật khẩu không hợp lệ.')
+    if (newPassword.length < 8) throw httpError(400, 'Mật khẩu mới phải có ít nhất 8 ký tự.')
+    if (newPassword !== confirmPassword) throw httpError(400, 'Xác nhận mật khẩu không khớp.')
+    let userId: string
+    try {
+      userId = resetPasswordWithToken(db, token, bcrypt.hashSync(newPassword, 10))
+    } catch {
+      throw httpError(400, 'Token đặt lại mật khẩu không hợp lệ hoặc đã hết hạn.')
+    }
+    const user = getUserById(userId)
+    if (user) pushAudit(user.id, user.email, 2, 'User', user.id, 'Đặt lại mật khẩu tài khoản', '127.0.0.1', 'security')
+    res.json({ ok: true })
+  } catch (e) { next(e) }
 })
 
 authRouter.put('/change-password', requireAuth, (req: AuthedRequest, res, next) => {
@@ -79,8 +126,8 @@ authRouter.put('/change-password', requireAuth, (req: AuthedRequest, res, next) 
       throw httpError(400, 'Mật khẩu hiện tại không đúng.')
     }
 
-    db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(bcrypt.hashSync(newPassword, 10), req.user!.id)
-    pushAudit(req.user!.id, req.user!.email, 2, 'User', req.user!.id, 'Đổi mật khẩu tài khoản')
+    changePasswordAndInvalidateSessions(db, req.user!.id, bcrypt.hashSync(newPassword, 10))
+    pushAudit(req.user!.id, req.user!.email, 2, 'User', req.user!.id, 'Đổi mật khẩu tài khoản', '127.0.0.1', 'security')
     res.json({ ok: true })
   } catch (e) { next(e) }
 })

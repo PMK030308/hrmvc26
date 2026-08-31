@@ -6,6 +6,7 @@ import type { User, PermissionFlag, RoleCode } from '@/types'
 import { authApi } from '@/api/auth'
 
 const TOKEN_KEY = 'hrm-token'
+const REFRESH_TOKEN_KEY = 'hrm-refresh-token'
 
 interface AuthState {
   user: User | null
@@ -30,8 +31,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   async login(email, password) {
     set({ loading: true })
     try {
-      const { token, user } = await authApi.login(email, password)
+      const { token, refreshToken, user } = await authApi.login(email, password)
       localStorage.setItem(TOKEN_KEY, token)
+      localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken)
       set({ user, token, loading: false, initialized: true })
       return user
     } catch (e) {
@@ -43,6 +45,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   async logout() {
     try { await authApi.logout() } catch { /* ignore */ }
     localStorage.removeItem(TOKEN_KEY)
+    localStorage.removeItem(REFRESH_TOKEN_KEY)
     set({ user: null, token: null })
   },
 
@@ -54,6 +57,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       set({ user, token, initialized: true })
     } catch {
       localStorage.removeItem(TOKEN_KEY)
+      localStorage.removeItem(REFRESH_TOKEN_KEY)
       set({ user: null, token: null, initialized: true })
     }
   },
@@ -64,6 +68,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       set({ user })
     } catch (error) {
       localStorage.removeItem(TOKEN_KEY)
+      localStorage.removeItem(REFRESH_TOKEN_KEY)
       set({ user: null, token: null })
       throw error
     }

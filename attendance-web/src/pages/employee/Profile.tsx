@@ -48,7 +48,11 @@ export default function ProfilePage() {
   })
   const changePassword = useMutation({
     mutationFn: () => authApi.changePassword(passwords),
-    onSuccess: () => { toast.success('Đổi mật khẩu thành công.'); setPasswords({ currentPassword: '', newPassword: '', confirmPassword: '' }) },
+    onSuccess: () => {
+      toast.success('Đổi mật khẩu thành công. Vui lòng đăng nhập lại.')
+      setPasswords({ currentPassword: '', newPassword: '', confirmPassword: '' })
+      void useAuthStore.getState().logout()
+    },
     onError: (error: Error) => toast.error(error.message),
   })
   const updateAvatar = useMutation({

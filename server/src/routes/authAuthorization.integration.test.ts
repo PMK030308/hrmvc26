@@ -53,8 +53,8 @@ after(async () => {
 })
 
 beforeEach(() => {
-  db.prepare("UPDATE users SET is_active=1, roles='[\"Admin\"]' WHERE id='admin'").run()
-  db.prepare("UPDATE users SET is_active=1, roles='[\"Employee\"]' WHERE id='employee'").run()
+  db.prepare("UPDATE users SET is_active=1, session_version=1, roles='[\"Admin\"]' WHERE id='admin'").run()
+  db.prepare("UPDATE users SET is_active=1, session_version=1, roles='[\"Employee\"]' WHERE id='employee'").run()
   db.prepare(`UPDATE role_feature_permissions SET allowed=1
     WHERE role='Employee' AND feature='requests.request' AND action='view_own'`).run()
 })

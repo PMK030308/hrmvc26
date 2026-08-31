@@ -71,7 +71,7 @@ function insertEmployee(id: string, departmentId: string): void {
 }
 
 function authToken(): string {
-  return jwt.sign({ id: 'user', roles: ['Admin'] }, process.env.JWT_SECRET || 'hrm-attendance-dev-secret-change-me', { expiresIn: '1h' })
+  return jwt.sign({ id: 'user', roles: ['Admin'], session_version: 1, token_type: 'access' }, process.env.JWT_SECRET || 'hrm-attendance-dev-secret-change-me', { expiresIn: '1h' })
 }
 
 test('static my-shift helper is not shadowed by the generic request detail route', async () => {

@@ -7,13 +7,25 @@ import { isoNow } from './lib/date.js'
 
 export type AuditAction = 1 | 2 | 3 | 4 | 5 | 6 // Create|Update|Delete|Login|Logout|View
 
+const BUSINESS_RETENTION_ENTITIES = new Set([
+  'Employee', 'User', 'Delegation', 'Request', 'ShiftSwap', 'SummaryTimesheet',
+  'SummaryTimesheetDetail', 'Payroll', 'Payslip', 'Regulation', 'LeaveType',
+])
+
+export function classifyAuditRetention(entity: string): 'business' | 'security' {
+  return BUSINESS_RETENTION_ENTITIES.has(entity) ? 'business' : 'security'
+}
+
 export function pushAudit(
   userId: string, userName: string, action: number, entity: string,
   entityId: string | null, detail: string, ipAddress = '127.0.0.1',
+  retentionClass: 'business' | 'security' = classifyAuditRetention(entity),
 ): void {
-  db.prepare(`INSERT INTO audit_logs (id, user_id, user_name, action, entity, entity_id, detail, ip_address, created_at)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-    `aud-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, userId, userName, action, entity, entityId, detail, ipAddress, isoNow())
+  db.prepare(`INSERT INTO audit_logs
+    (id, user_id, user_name, action, entity, entity_id, detail, ip_address, created_at, retention_class)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+    `aud-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, userId, userName, action,
+    entity, entityId, detail, ipAddress, isoNow(), retentionClass)
 }
 
 export function pushNotification(

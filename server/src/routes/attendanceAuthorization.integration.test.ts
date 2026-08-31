@@ -78,7 +78,7 @@ function allow(permission: string): void {
 }
 
 function token(): string {
-  return jwt.sign({ id: 'actor', roles: ['Admin'] }, process.env.JWT_SECRET || 'hrm-attendance-dev-secret-change-me', { expiresIn: '1h' })
+  return jwt.sign({ id: 'actor', roles: ['Admin'], session_version: 1, token_type: 'access' }, process.env.JWT_SECRET || 'hrm-attendance-dev-secret-change-me', { expiresIn: '1h' })
 }
 
 async function proxy(body: Record<string, unknown>) {

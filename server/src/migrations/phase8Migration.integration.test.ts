@@ -8,6 +8,10 @@ function databaseBeforePhase8(): Database.Database {
   const database = new Database(':memory:')
   database.exec(`
     CREATE TABLE users (id TEXT PRIMARY KEY);
+    CREATE TABLE audit_logs (
+      id TEXT PRIMARY KEY, user_id TEXT NOT NULL, user_name TEXT NOT NULL, action INTEGER NOT NULL,
+      entity TEXT NOT NULL, entity_id TEXT, detail TEXT NOT NULL, ip_address TEXT, created_at TEXT NOT NULL
+    );
     CREATE TABLE punches (id TEXT PRIMARY KEY, employee_id TEXT NOT NULL, date TEXT NOT NULL, punched_at TEXT NOT NULL, source INTEGER NOT NULL);
     CREATE TABLE summary_timesheets (id TEXT PRIMARY KEY, period TEXT NOT NULL UNIQUE, status INTEGER NOT NULL DEFAULT 2, from_date TEXT NOT NULL, to_date TEXT NOT NULL);
     CREATE TABLE payslips (id TEXT PRIMARY KEY, period TEXT NOT NULL, employee_id TEXT NOT NULL, employee_name TEXT NOT NULL);
@@ -30,7 +34,7 @@ function databaseBeforePhase8(): Database.Database {
 test('phase 8 migration adds nullable storage metadata without changing legacy payload', () => {
   const database = databaseBeforePhase8()
   try {
-    assert.deepEqual(runMigrations(database, SCHEMA_MIGRATIONS).appliedVersions, [1, 2, 3, 4, 5])
+    assert.deepEqual(runMigrations(database, SCHEMA_MIGRATIONS).appliedVersions, [1, 2, 3, 4, 5, 6])
     const columns = new Set((database.prepare('PRAGMA table_info(request_attachments)').all() as any[]).map((row) => row.name))
     assert.equal(columns.has('storage_provider'), true)
     assert.equal(columns.has('storage_key'), true)

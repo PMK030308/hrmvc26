@@ -146,4 +146,53 @@ export const SCHEMA_MIGRATIONS: readonly SchemaMigration[] = [
         WHERE completed_at IS NULL`)
     },
   },
+  {
+    version: 6,
+    name: 'session_invalidation_and_retention',
+    checksumSource: [
+      'users.session_version INTEGER NOT NULL DEFAULT 1',
+      'audit_logs.retention_class TEXT NOT NULL DEFAULT security',
+      'password_reset_tokens(id,user_id,token_hash,expires_at,consumed_at,created_at)',
+      'retention_cleanup_runs(id,category,dry_run,cutoff_at,scanned_count,deleted_count,error_count,started_at,completed_at)',
+      'retention_cleanup_locks(category,owner_id,expires_at)',
+    ].join('\n'),
+    up(database) {
+      if (!hasColumn(database, 'users', 'session_version')) {
+        database.exec('ALTER TABLE users ADD COLUMN session_version INTEGER NOT NULL DEFAULT 1')
+      }
+      if (!hasColumn(database, 'audit_logs', 'retention_class')) {
+        database.exec("ALTER TABLE audit_logs ADD COLUMN retention_class TEXT NOT NULL DEFAULT 'security'")
+      }
+      database.exec(`CREATE TABLE IF NOT EXISTS password_reset_tokens (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        token_hash TEXT NOT NULL UNIQUE,
+        expires_at TEXT NOT NULL,
+        consumed_at TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      ); CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user
+        ON password_reset_tokens(user_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_expiry
+        ON password_reset_tokens(expires_at) WHERE consumed_at IS NULL;
+      CREATE TABLE IF NOT EXISTS retention_cleanup_runs (
+        id TEXT PRIMARY KEY,
+        category TEXT NOT NULL,
+        dry_run INTEGER NOT NULL,
+        cutoff_at TEXT NOT NULL,
+        scanned_count INTEGER NOT NULL DEFAULT 0,
+        deleted_count INTEGER NOT NULL DEFAULT 0,
+        error_count INTEGER NOT NULL DEFAULT 0,
+        started_at TEXT NOT NULL,
+        completed_at TEXT
+      );
+      CREATE TABLE IF NOT EXISTS retention_cleanup_locks (
+        category TEXT PRIMARY KEY,
+        owner_id TEXT NOT NULL,
+        expires_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_audit_retention
+        ON audit_logs(retention_class, created_at)`)
+    },
+  },
 ]

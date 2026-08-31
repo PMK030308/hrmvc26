@@ -60,6 +60,7 @@ export interface User {
 
 export interface AuthResult {
   token: string
+  refreshToken: string
   user: User
 }
 

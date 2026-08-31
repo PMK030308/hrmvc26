@@ -121,8 +121,23 @@ Dừng hoặc rollback khi có một trong các điều kiện:
 - Có double side effect ở approve/confirm/transfer.
 - Tỷ lệ `5xx` vượt ngưỡng vận hành đã thống nhất.
 
-## 8. Các policy chưa được tự động hóa
+## 8. Phase 9 session và retention
 
-- Password change chưa tự vô hiệu hóa mọi token cũ cho đến khi chốt session-version contract.
-- Audit/face/chat retention chưa tự xóa dữ liệu vì chưa có retention policy được duyệt.
-- Attachment vẫn dùng SQLite data URL trong expand-contract phase; chuyển file/object storage là rollout riêng.
+- Access/refresh JWT chứa `session_version`; backend so sánh claim với DB-fresh user ở mọi protected request.
+- Đổi/reset password tăng `session_version` cùng transaction với password hash, nên toàn bộ token cũ trả `401`.
+- Reset token mặc định 15 phút, one-time và DB chỉ lưu SHA-256 hash. Production không được bật `PASSWORD_RESET_EXPOSE_TOKEN`.
+- Retention không chạy khi startup. Lệnh thủ công mặc định dry-run:
+
+```bash
+npm run retention:cleanup -- audit-security
+npm run retention:cleanup -- audit-business
+npm run retention:cleanup -- face-attempt-metadata
+npm run retention:cleanup -- chatbot-metadata
+
+npm run retention:cleanup -- audit-security --apply --batch-size=100
+```
+
+- `audit-security`: 1 năm; `audit-business`: 2 năm; face-attempt metadata: 90 ngày.
+- Hệ thống hiện không lưu face-attempt capture riêng hay chatbot conversation metadata, nên không xóa `employee_face_data`; chatbot business mutation vẫn nằm trong audit 2 năm.
+- Mỗi cleanup category có lease, bounded batch và bản ghi `retention_cleanup_runs` không chứa payload nhạy cảm.
+- Production CORS chỉ chấp nhận exact HTTPS origins. `TRUST_PROXY=false` khi Node nhận traffic trực tiếp; chỉ dùng `1` khi có đúng một reverse proxy do mình kiểm soát và proxy ghi đè `X-Forwarded-For`.

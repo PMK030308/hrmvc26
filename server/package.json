@@ -12,6 +12,7 @@
     "seed": "tsx src/seed.ts",
     "attachments:backfill": "tsx src/scripts/attachmentStorageMaintenance.ts backfill",
     "attachments:cleanup": "tsx src/scripts/attachmentStorageMaintenance.ts cleanup",
+    "retention:cleanup": "tsx src/scripts/retentionMaintenance.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js"
   },

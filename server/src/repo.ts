@@ -42,6 +42,7 @@ export function mapUser(r: any) {
     permissions: json(r.permissions, []), departmentScopes: json(r.department_scopes, []),
     isActive: r.is_active == null ? true : bool(r.is_active),
     authorizationVersion: Number(r.authz_version ?? 1),
+    sessionVersion: Number(r.session_version ?? 1),
   }
 }
 export const getUserById = (id: string) => {

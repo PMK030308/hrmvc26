@@ -26,6 +26,20 @@ export function resolveSecurityConfig(env: NodeJS.ProcessEnv | Record<string, st
   }
   const corsOrigins = (env.CORS_ORIGINS ?? '').split(',').map((origin) => origin.trim()).filter(Boolean)
   if (production && corsOrigins.length === 0) throw new Error('CORS_ORIGINS phải được cấu hình trong production.')
+  if (production) {
+    for (const origin of corsOrigins) {
+      let parsed: URL
+      try { parsed = new URL(origin) } catch { throw new Error(`CORS_ORIGINS chứa origin không hợp lệ: ${origin}`) }
+      if (parsed.protocol !== 'https:') throw new Error(`CORS_ORIGINS production chỉ chấp nhận HTTPS: ${origin}`)
+      if (origin.includes('*') || parsed.pathname !== '/' || parsed.search || parsed.hash || parsed.username || parsed.password) {
+        throw new Error(`CORS_ORIGINS phải là exact origin: ${origin}`)
+      }
+    }
+    const trustProxy = parseTrustProxy(env.TRUST_PROXY)
+    if (trustProxy !== false && trustProxy !== 1) {
+      throw new Error('TRUST_PROXY production chỉ được là false hoặc 1 cho đúng một reverse proxy được kiểm soát.')
+    }
+  }
   return {
     jwtSecret,
     corsOrigins: corsOrigins.length > 0 ? corsOrigins : null,
