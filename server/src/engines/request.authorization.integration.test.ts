@@ -325,11 +325,17 @@ test('attachment routes hide the parent from outsiders and enforce separate uplo
   try {
     const outsiderHeaders = { Authorization: `Bearer ${outsiderToken}`, 'Content-Type': 'application/json' }
     assert.equal((await fetch(`${baseUrl}/late-earlies/attachment-route/attachments`, { headers: outsiderHeaders })).status, 404)
+    assert.equal((await fetch(`${baseUrl}/attachments/attachment-existing/download`, { headers: outsiderHeaders })).status, 404)
     assert.equal((await fetch(`${baseUrl}/late-earlies/attachment-route/attachments`, { method: 'POST', headers: outsiderHeaders, body: uploadBody })).status, 404)
     assert.equal((await fetch(`${baseUrl}/attachments/attachment-existing`, { method: 'DELETE', headers: outsiderHeaders })).status, 404)
 
     const ownerHeaders = { Authorization: `Bearer ${ownerToken}`, 'Content-Type': 'application/json' }
     assert.equal((await fetch(`${baseUrl}/late-earlies/attachment-route/attachments`, { headers: ownerHeaders })).status, 200)
+    const download = await fetch(`${baseUrl}/attachments/attachment-existing/download`, { headers: ownerHeaders })
+    assert.equal(download.status, 200)
+    assert.equal(download.headers.get('content-type'), 'application/pdf')
+    assert.match(download.headers.get('content-disposition') ?? '', /attachment; filename="proof.pdf"/)
+    assert.deepEqual(Buffer.from(await download.arrayBuffer()), Buffer.from([0]))
     const uploaded = await fetch(`${baseUrl}/late-earlies/attachment-route/attachments`, { method: 'POST', headers: ownerHeaders, body: uploadBody })
     assert.equal(uploaded.status, 200)
     const uploadedBody = await uploaded.json() as any
