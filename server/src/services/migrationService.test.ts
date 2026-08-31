@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import Database from 'better-sqlite3'
-import { runMigrations, type SchemaMigration } from './migrationService.js'
+import { inspectMigrationState, runMigrations, type SchemaMigration } from './migrationService.js'
 
 function migration(version: number, name: string, sql: string): SchemaMigration {
   return { version, name, checksumSource: sql, up: (database) => database.exec(sql) }
@@ -49,5 +49,19 @@ test('migration checksum is stable across LF and CRLF line endings', () => {
   try {
     runMigrations(database, [lf])
     assert.doesNotThrow(() => runMigrations(database, [crlf]))
+  } finally { database.close() }
+})
+
+test('read-only migration inspection reports pending versions and rejects checksum drift', () => {
+  const database = new Database(':memory:')
+  const migrations = [
+    migration(1, 'create_example', 'CREATE TABLE example (id TEXT PRIMARY KEY)'),
+    migration(2, 'add_example_name', 'ALTER TABLE example ADD COLUMN name TEXT'),
+  ]
+  try {
+    runMigrations(database, [migrations[0]])
+    assert.deepEqual(inspectMigrationState(database, migrations), { appliedVersions: [1], pendingVersions: [2] })
+    database.prepare("UPDATE schema_migrations SET checksum='tampered' WHERE version=1").run()
+    assert.throws(() => inspectMigrationState(database, migrations), /checksum/i)
   } finally { database.close() }
 })
