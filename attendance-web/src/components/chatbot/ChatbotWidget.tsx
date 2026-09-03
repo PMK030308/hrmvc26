@@ -84,7 +84,7 @@ function DraftCard({ draft, onConfirm, onSkip, loading }: {
 
 export function ChatbotWidget() {
   const user = useAuthStore((s) => s.user)
-  const [enabled, setEnabled] = useState(true)
+  const [enabled, setEnabled] = useState<boolean | null>(null)
   const [open, setOpen] = useState(false)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
@@ -99,11 +99,11 @@ export function ChatbotWidget() {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
   }, [messages, busy, open])
 
-  if (!user || !enabled) return null
+  if (!user) return null
 
   async function send(text: string) {
     const content = text.trim()
-    if (!content || busy) return
+    if (!content || busy || enabled !== true) return
     const history = messages.map((m) => ({ role: m.role, content: m.content }))
     const next: ChatMessage = { role: 'user', content }
     setMessages((m) => [...m, next])
@@ -138,7 +138,8 @@ export function ChatbotWidget() {
       <button
         onClick={() => setOpen((o) => !o)}
         className={cn(
-          'fixed bottom-20 right-4 z-50 grid h-14 w-14 place-items-center rounded-full bg-brand-600 text-white shadow-lg transition hover:bg-brand-700 lg:bottom-6 lg:right-6',
+          'fixed bottom-20 right-4 z-50 grid h-14 w-14 place-items-center rounded-full text-white shadow-lg transition lg:bottom-6 lg:right-6',
+          enabled === false ? 'bg-slate-500 hover:bg-slate-600' : 'bg-brand-600 hover:bg-brand-700',
           open && 'rotate-90',
         )}
         aria-label="Trợ lý HRM"
@@ -160,14 +161,21 @@ export function ChatbotWidget() {
               <div className="grid h-9 w-9 place-items-center rounded-full bg-white/20"><Bot className="h-5 w-5" /></div>
               <div className="flex-1">
                 <p className="text-sm font-semibold">HRM Assistant</p>
-                <p className="text-[10px] text-white/80">Tra cứu & tạo đơn tự động</p>
+                <p className="text-[10px] text-white/80">{enabled === false ? 'Chưa cấu hình dịch vụ AI' : enabled === null ? 'Đang kiểm tra kết nối...' : 'Tra cứu & tạo đơn tự động'}</p>
               </div>
               <button onClick={() => setOpen(false)} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-white/20"><X className="h-4 w-4" /></button>
             </div>
 
             {/* Messages */}
             <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto bg-slate-50 p-3">
-              {messages.length === 0 && (
+              {enabled === false ? (
+                <div className="rounded-2xl rounded-tl-sm bg-white p-4 text-sm text-slate-700 ring-1 ring-slate-200">
+                  <p className="font-semibold text-slate-800">Chatbot chưa được kích hoạt</p>
+                  <p className="mt-1.5 text-xs leading-5 text-slate-500">Server chưa có <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-[11px]">GEMINI_API_KEY</code>. Hãy thêm key vào file <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-[11px]">server/.env</code> rồi khởi động lại backend.</p>
+                </div>
+              ) : enabled === null ? (
+                <div className="flex items-center justify-center gap-2 py-10 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> Đang kiểm tra chatbot...</div>
+              ) : messages.length === 0 && (
                 <div className="space-y-3">
                   <div className="rounded-2xl rounded-tl-sm bg-white p-3 text-sm text-slate-700 ring-1 ring-slate-200">
                     Chào <span className="font-semibold">{user.roles.includes('Admin') || user.roles.includes('HR') ? 'quản lý' : 'bạn'}</span>! 👋 Mình có thể giúp <b>tra cứu thông tin</b> (chấm công, đơn từ, quỹ phép, OT...) và <b>tạo đơn tự động</b>. Thử gợi ý bên dưới nhé:
@@ -216,7 +224,7 @@ export function ChatbotWidget() {
             </div>
 
             {/* Input */}
-            <div className="border-t border-slate-100 bg-white p-2.5">
+            {enabled === true && <div className="border-t border-slate-100 bg-white p-2.5">
               <form
                 onSubmit={(e) => { e.preventDefault(); send(input) }}
                 className="flex items-end gap-2"
@@ -233,7 +241,7 @@ export function ChatbotWidget() {
                   <Send className="h-4 w-4" />
                 </Button>
               </form>
-            </div>
+            </div>}
           </motion.div>
         )}
       </AnimatePresence>
