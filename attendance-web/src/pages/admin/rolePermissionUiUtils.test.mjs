@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { countPermissionChanges, groupPermissionRows, matchesNormalizedSearch } from './rolePermissionUiUtils.ts'
+import { countPermissionChanges, groupPermissionRows, matchesNormalizedSearch, shouldSyncPermissionMatrix } from './rolePermissionUiUtils.ts'
 
 const rows = [
   { key: 'requests.request.view_own', module: 'requests', label: 'Xem đơn của mình', roles: { Employee: true, Admin: true } },
@@ -36,4 +36,15 @@ test('counts each changed role checkbox', () => {
   draft[2].roles.Employee = true
 
   assert.equal(countPermissionChanges(rows, draft), 2)
+})
+
+test('syncs a newer server matrix only while the local draft is clean', () => {
+  const cleanDraft = rows.map((row) => ({ ...row, roles: { ...row.roles } }))
+  const dirtyDraft = rows.map((row) => ({ ...row, roles: { ...row.roles } }))
+  dirtyDraft[0].roles.Employee = false
+
+  assert.equal(shouldSyncPermissionMatrix(1, 2, rows, cleanDraft), true)
+  assert.equal(shouldSyncPermissionMatrix(1, 2, rows, dirtyDraft), false)
+  assert.equal(shouldSyncPermissionMatrix(2, 2, rows, cleanDraft), false)
+  assert.equal(shouldSyncPermissionMatrix(0, 1, [], []), true)
 })
