@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, ChevronDown, Pencil, Plus, Search, ShieldCheck, Users } from 'lucide-react'
 import { toast } from 'sonner'
@@ -9,7 +9,7 @@ import { togglePermission } from '@/lib/requestPermissionMatrix'
 import { useAuthStore } from '@/stores/authStore'
 import { Badge, Button, Card, CardHeader, EmptyState, Input, Modal, PageHeader, Select, Spinner } from '@/components/ui'
 import type { PermissionMatrixEntry, RoleCode, User } from '@/types'
-import { countPermissionChanges, groupPermissionRows, matchesNormalizedSearch } from './rolePermissionUiUtils'
+import { countPermissionChanges, groupPermissionRows, matchesNormalizedSearch, shouldSyncPermissionMatrix } from './rolePermissionUiUtils'
 
 const ALL_ROLES: RoleCode[] = ['Employee', 'Manager', 'Accountant', 'HR', 'Director', 'Admin']
 const MATRIX_ROLES: RoleCode[] = ['Guest', ...ALL_ROLES]
@@ -30,17 +30,15 @@ export default function AdminRoles() {
   const [permissionQuery, setPermissionQuery] = useState('')
   const [accountQuery, setAccountQuery] = useState('')
   const [expandedModules, setExpandedModules] = useState<Set<string>>(new Set())
-  const matrixInitialized = useRef(false)
 
   useEffect(() => {
-    if (!matrix || matrixInitialized.current) return
-    matrixInitialized.current = true
+    if (!matrix || !shouldSyncPermissionMatrix(matrixVersion, matrix.version, matrixBaseline, matrixDraft)) return
     const nextRows = matrix.permissions.map((row) => ({ ...row, roles: { ...row.roles } }))
     setMatrixVersion(matrix.version)
     setMatrixBaseline(nextRows.map((row) => ({ ...row, roles: { ...row.roles } })))
     setMatrixDraft(nextRows)
     setExpandedModules((current) => current.size > 0 || !nextRows[0] ? current : new Set([nextRows[0].module]))
-  }, [matrix])
+  }, [matrix, matrixBaseline, matrixDraft, matrixVersion])
 
   const employeeNames = useMemo(() => new Map((emps ?? []).map((employee) => [employee.id, employee.fullName])), [emps])
   const permissionGroups = useMemo(() => groupPermissionRows(matrixDraft, permissionQuery), [matrixDraft, permissionQuery])
