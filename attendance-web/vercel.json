@@ -2,7 +2,7 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "vite",
   "installCommand": "npm ci",
-  "buildCommand": "VITE_CONFIG_NATIVE_IGNORE_WARNING=true npm run build",
+  "buildCommand": "VITE_API_URL=https://hrm-attendance-api.onrender.com/api VITE_CONFIG_NATIVE_IGNORE_WARNING=true npm run build",
   "outputDirectory": "dist",
   "devCommand": "npm run dev",
   "rewrites": [{ "source": "/(.*)", "destination": "/" }]
