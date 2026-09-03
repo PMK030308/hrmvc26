@@ -92,6 +92,12 @@ export interface Employee {
   wage: number
 }
 
+export interface EmployeeProfile extends Employee {
+  departmentName: string | null
+  positionName: string | null
+  branchName: string | null
+}
+
 /* --------------------------------- Ca ------------------------------------- */
 export type ShiftStatus = 0 | 1 // Inactive | Active
 
