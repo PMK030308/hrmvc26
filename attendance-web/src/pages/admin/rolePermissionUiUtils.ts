@@ -46,11 +46,11 @@ export function countPermissionChanges<T extends PermissionRowLike>(baseline: T[
 }
 
 export function shouldSyncPermissionMatrix<T extends PermissionRowLike>(
-  currentVersion: number,
+  currentVersion: number | null,
   incomingVersion: number,
   baseline: T[],
   draft: T[],
 ): boolean {
-  if (draft.length === 0) return true
-  return incomingVersion !== currentVersion && countPermissionChanges(baseline, draft) === 0
+  if (currentVersion === null) return true
+  return incomingVersion > currentVersion && countPermissionChanges(baseline, draft) === 0
 }

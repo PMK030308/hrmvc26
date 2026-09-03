@@ -24,7 +24,7 @@ export default function AdminRoles() {
   const [activeTab, setActiveTab] = useState<PageTab>('matrix')
   const [edit, setEdit] = useState<User | null>(null)
   const [creating, setCreating] = useState(false)
-  const [matrixVersion, setMatrixVersion] = useState(0)
+  const [matrixVersion, setMatrixVersion] = useState<number | null>(null)
   const [matrixBaseline, setMatrixBaseline] = useState<PermissionMatrixEntry[]>([])
   const [matrixDraft, setMatrixDraft] = useState<PermissionMatrixEntry[]>([])
   const [permissionQuery, setPermissionQuery] = useState('')
@@ -72,7 +72,10 @@ export default function AdminRoles() {
     onError: (error: Error) => toast.error(error.message),
   })
   const saveMatrix = useMutation({
-    mutationFn: () => rolesApi.updateMatrix(matrixVersion, matrixDraft),
+    mutationFn: () => {
+      if (matrixVersion === null) throw new Error('Ma trận phân quyền chưa tải xong.')
+      return rolesApi.updateMatrix(matrixVersion, matrixDraft)
+    },
     onSuccess: async (saved) => {
       const nextRows = saved.permissions.map((row) => ({ ...row, roles: { ...row.roles } }))
       setMatrixVersion(saved.version)
@@ -125,12 +128,12 @@ export default function AdminRoles() {
 
 function PermissionMatrix({ groups, loading, version, total, query, onQuery, changed, expanded, onToggleModule, onCollapse, onExpandAll, setDraft, saving, onSave }: {
   groups: ReturnType<typeof groupPermissionRows<PermissionMatrixEntry>>
-  loading: boolean; version: number; total: number; query: string; onQuery: (value: string) => void; changed: number
+  loading: boolean; version: number | null; total: number; query: string; onQuery: (value: string) => void; changed: number
   expanded: Set<string>; onToggleModule: (module: string) => void; onCollapse: () => void; onExpandAll: () => void
   setDraft: React.Dispatch<React.SetStateAction<PermissionMatrixEntry[]>>; saving: boolean; onSave: () => void
 }) {
   return <Card className="overflow-hidden">
-    <CardHeader title="Ma trận phân quyền" subtitle={`${groups.length} nhóm quyền · phiên bản ${version || '—'}`} icon={<ShieldCheck className="h-4 w-4" />}
+    <CardHeader title="Ma trận phân quyền" subtitle={`${groups.length} nhóm quyền · phiên bản ${version ?? '—'}`} icon={<ShieldCheck className="h-4 w-4" />}
       action={<Button size="sm" loading={saving} disabled={changed === 0} icon={<Check className="h-3.5 w-3.5" />} onClick={onSave}>{changed > 0 ? `Lưu ${changed} thay đổi` : 'Đã lưu'}</Button>} />
     <div className="flex flex-col gap-3 border-b border-slate-100 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
       <SearchBox value={query} onChange={onQuery} placeholder="Tìm tên hoặc mã quyền..." label="Tìm quyền" />
