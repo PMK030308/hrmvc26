@@ -46,5 +46,7 @@ test('syncs a newer server matrix only while the local draft is clean', () => {
   assert.equal(shouldSyncPermissionMatrix(1, 2, rows, cleanDraft), true)
   assert.equal(shouldSyncPermissionMatrix(1, 2, rows, dirtyDraft), false)
   assert.equal(shouldSyncPermissionMatrix(2, 2, rows, cleanDraft), false)
+  assert.equal(shouldSyncPermissionMatrix(2, 1, rows, cleanDraft), false)
   assert.equal(shouldSyncPermissionMatrix(0, 1, [], []), true)
+  assert.equal(shouldSyncPermissionMatrix(1, 1, [], []), false)
 })
