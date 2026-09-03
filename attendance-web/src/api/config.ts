@@ -3,6 +3,9 @@
 // ============================================================================
 import { api } from './http'
 import type { AttendanceRegulation, LeaveType, User, Employee, EmployeeProfile, RoleCode, PermissionMatrixSnapshot } from '@/types'
+import { isLegacyAuthorizationUser, normalizeAuthorizationUser, normalizePermissionMatrixResponse } from '@/lib/authorizationApiCompatibility'
+
+let legacyAuthorizationApi = false
 
 export const regulationsApi = {
   attendance(): Promise<AttendanceRegulation> { return api.get('/config/regulations/attendance') },
@@ -16,18 +19,26 @@ export const regulationsApi = {
 }
 
 export const rolesApi = {
-  matrix(): Promise<PermissionMatrixSnapshot> {
-    return api.get('/config/roles/matrix')
+  async matrix(): Promise<PermissionMatrixSnapshot> {
+    const response = await api.get<unknown>('/config/roles/matrix')
+    legacyAuthorizationApi = Array.isArray(response)
+    return normalizePermissionMatrixResponse(response)
   },
   updateMatrix(expectedVersion: number, permissions: PermissionMatrixSnapshot['permissions']): Promise<PermissionMatrixSnapshot> {
+    if (legacyAuthorizationApi) return Promise.reject(new Error('Backend hiện tại chỉ hỗ trợ xem ma trận quyền.'))
     return api.put('/config/roles/matrix', { expectedVersion, permissions })
   },
-  users(): Promise<User[]> { return api.get('/config/roles/users') },
-  updateUserAuthorization(userId: string, payload: Pick<User, 'roles' | 'isActive' | 'departmentScopes' | 'authorizationVersion'>): Promise<User> {
-    return api.put(`/config/roles/users/${userId}`, { ...payload, expectedVersion: payload.authorizationVersion })
+  async users(): Promise<User[]> {
+    const response = await api.get<unknown[]>('/config/roles/users')
+    legacyAuthorizationApi ||= response.some(isLegacyAuthorizationUser)
+    return response.map(normalizeAuthorizationUser)
   },
-  createUser(payload: { email: string; employeeId: string; roles: RoleCode[] }): Promise<User> {
-    return api.post('/config/roles/users', payload)
+  async updateUserAuthorization(userId: string, payload: Pick<User, 'roles' | 'isActive' | 'departmentScopes' | 'authorizationVersion'>): Promise<User> {
+    const body = legacyAuthorizationApi ? payload.roles : { ...payload, expectedVersion: payload.authorizationVersion }
+    return normalizeAuthorizationUser(await api.put(`/config/roles/users/${userId}`, body))
+  },
+  async createUser(payload: { email: string; employeeId: string; roles: RoleCode[] }): Promise<User> {
+    return normalizeAuthorizationUser(await api.post('/config/roles/users', payload))
   },
 }
 

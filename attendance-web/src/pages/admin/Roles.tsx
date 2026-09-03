@@ -108,6 +108,7 @@ export default function AdminRoles() {
 
     {activeTab === 'matrix' ? <PermissionMatrix
       groups={permissionGroups} loading={isLoading} version={matrixVersion} total={matrixDraft.length}
+      readOnly={matrix?.readOnly ?? false}
       query={permissionQuery} onQuery={setPermissionQuery} changed={changedPermissions}
       expanded={expandedModules} onToggleModule={toggleModule} onCollapse={() => setExpandedModules(new Set())}
       onExpandAll={() => setExpandedModules(new Set(permissionGroups.map((group) => group.module)))}
@@ -126,15 +127,15 @@ export default function AdminRoles() {
   </div>
 }
 
-function PermissionMatrix({ groups, loading, version, total, query, onQuery, changed, expanded, onToggleModule, onCollapse, onExpandAll, setDraft, saving, onSave }: {
+function PermissionMatrix({ groups, loading, version, total, readOnly, query, onQuery, changed, expanded, onToggleModule, onCollapse, onExpandAll, setDraft, saving, onSave }: {
   groups: ReturnType<typeof groupPermissionRows<PermissionMatrixEntry>>
-  loading: boolean; version: number | null; total: number; query: string; onQuery: (value: string) => void; changed: number
+  loading: boolean; version: number | null; total: number; readOnly: boolean; query: string; onQuery: (value: string) => void; changed: number
   expanded: Set<string>; onToggleModule: (module: string) => void; onCollapse: () => void; onExpandAll: () => void
   setDraft: React.Dispatch<React.SetStateAction<PermissionMatrixEntry[]>>; saving: boolean; onSave: () => void
 }) {
   return <Card className="overflow-hidden">
-    <CardHeader title="Ma trận phân quyền" subtitle={`${groups.length} nhóm quyền · phiên bản ${version ?? '—'}`} icon={<ShieldCheck className="h-4 w-4" />}
-      action={<Button size="sm" loading={saving} disabled={changed === 0} icon={<Check className="h-3.5 w-3.5" />} onClick={onSave}>{changed > 0 ? `Lưu ${changed} thay đổi` : 'Đã lưu'}</Button>} />
+    <CardHeader title="Ma trận phân quyền" subtitle={readOnly ? `${groups.length} nhóm quyền · backend cũ, chỉ xem` : `${groups.length} nhóm quyền · phiên bản ${version ?? '—'}`} icon={<ShieldCheck className="h-4 w-4" />}
+      action={<Button size="sm" loading={saving} disabled={readOnly || changed === 0} icon={<Check className="h-3.5 w-3.5" />} onClick={onSave}>{readOnly ? 'Chỉ xem' : changed > 0 ? `Lưu ${changed} thay đổi` : 'Đã lưu'}</Button>} />
     <div className="flex flex-col gap-3 border-b border-slate-100 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
       <SearchBox value={query} onChange={onQuery} placeholder="Tìm tên hoặc mã quyền..." label="Tìm quyền" />
       <div className="flex items-center justify-between gap-2 sm:justify-end"><span className="text-xs text-slate-500">{total} quyền · {changed} thay đổi</span>{query.trim() ? <span className="text-xs font-medium text-brand-600">Đang lọc kết quả</span> : <><Button size="sm" variant="ghost" onClick={onCollapse}>Thu gọn</Button><Button size="sm" variant="ghost" onClick={onExpandAll}>Mở tất cả</Button></>}</div>

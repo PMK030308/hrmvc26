@@ -41,6 +41,7 @@ export interface PermissionMatrixEntry {
 export interface PermissionMatrixSnapshot {
   version: number
   permissions: PermissionMatrixEntry[]
+  readOnly?: boolean
 }
 
 export interface User {
