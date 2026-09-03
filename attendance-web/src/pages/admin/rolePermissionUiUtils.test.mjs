@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { countPermissionChanges, groupPermissionRows } from './rolePermissionUiUtils.ts'
+import { countPermissionChanges, groupPermissionRows, matchesNormalizedSearch } from './rolePermissionUiUtils.ts'
 
 const rows = [
   { key: 'requests.request.view_own', module: 'requests', label: 'Xem đơn của mình', roles: { Employee: true, Admin: true } },
@@ -23,6 +23,11 @@ test('filters permissions by human label, technical key, or module label', () =>
   assert.deepEqual(groupPermissionRows(rows, 'tổ chức').flatMap((group) => group.rows.map((row) => row.key)), ['org.catalog.view'])
   assert.deepEqual(groupPermissionRows(rows, 'create_own').flatMap((group) => group.rows.map((row) => row.key)), ['requests.request.create_own'])
   assert.deepEqual(groupPermissionRows(rows, 'xem đơn').flatMap((group) => group.rows.map((row) => row.key)), ['requests.request.view_own'])
+  assert.deepEqual(groupPermissionRows(rows, 'xem don').flatMap((group) => group.rows.map((row) => row.key)), ['requests.request.view_own'])
+})
+
+test('matches Vietnamese account text with an unaccented query', () => {
+  assert.equal(matchesNormalizedSearch('Đặng Phương Anh · Nhân viên', 'dang phuong'), true)
 })
 
 test('counts each changed role checkbox', () => {
