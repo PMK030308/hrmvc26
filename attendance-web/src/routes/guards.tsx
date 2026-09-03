@@ -4,6 +4,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { homeForRoles } from '@/components/layout/nav'
 import type { RoleCode } from '@/types'
 import { Spinner } from '@/components/ui'
+import { allowsAnyUiPermission, allowsUiPermission } from '@/lib/permissionCompatibility'
 
 /** Yêu cầu đã đăng nhập; khởi tạo auth từ token. */
 export function RequireAuth({ children }: { children: ReactNode }) {
@@ -46,7 +47,7 @@ export function GuestOnly({ children }: { children: ReactNode }) {
 /** Presentation guard theo capability DB-fresh; backend vẫn là nơi quyết định quyền. */
 export function RequirePermission({ permission, children }: { permission: string; children: ReactNode }) {
   const user = useAuthStore((s) => s.user)!
-  if (!user.effectivePermissions?.includes(permission)) {
+  if (!allowsUiPermission(user.effectivePermissions, permission, user.roles)) {
     return <Navigate to={homeForRoles(user.roles)} replace />
   }
   return <>{children}</>
@@ -54,7 +55,7 @@ export function RequirePermission({ permission, children }: { permission: string
 
 export function RequireAnyPermission({ permissions, children }: { permissions: string[]; children: ReactNode }) {
   const user = useAuthStore((s) => s.user)!
-  if (!permissions.some((permission) => user.effectivePermissions?.includes(permission))) {
+  if (!allowsAnyUiPermission(user.effectivePermissions, permissions, user.roles)) {
     return <Navigate to={homeForRoles(user.roles)} replace />
   }
   return <>{children}</>

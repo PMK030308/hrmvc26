@@ -13,7 +13,7 @@ import { ChatbotWidget } from '@/components/chatbot/ChatbotWidget'
 import { orgApi } from '@/api/org'
 import { useQuery } from '@tanstack/react-query'
 import { cn } from '@/lib/cn'
-import { phase6Capabilities } from '@/lib/phase6Capabilities'
+import { allowsAnyUiPermission, allowsUiPermission } from '@/lib/permissionCompatibility'
 
 function SidebarItem({ item, onNav }: { item: NavItem; onNav?: () => void }) {
   const Icon = item.icon
@@ -106,18 +106,17 @@ function UserMenu({ placement = 'topbar' }: { placement?: 'sidebar' | 'topbar' }
 
 export function AppLayout() {
   const user = useAuthStore((s) => s.user)!
-  const chatbotCapabilities = phase6Capabilities(user.effectivePermissions ?? [])
   const sidebarOpen = useUIStore((s) => s.sidebarOpen)
   const setSidebar = useUIStore((s) => s.setSidebar)
   const location = useLocation()
   const baseNav = navForRoles(user.roles)
-  const withAuthorization = user.effectivePermissions?.includes('config.permission.manage') && !baseNav.some((item) => item.to === authorizationNavItem.to)
+  const withAuthorization = allowsUiPermission(user.effectivePermissions, 'config.permission.manage', user.roles) && !baseNav.some((item) => item.to === authorizationNavItem.to)
     ? [...baseNav, authorizationNavItem]
     : baseNav
   const nav = withAuthorization.filter((item) =>
     (!item.roles || item.roles.some((role) => user.roles.includes(role)))
-    && (!item.permission || user.effectivePermissions?.includes(item.permission))
-    && (!item.permissionAny || item.permissionAny.some((permission) => user.effectivePermissions?.includes(permission))),
+    && (!item.permission || allowsUiPermission(user.effectivePermissions, item.permission, user.roles))
+    && (!item.permissionAny || allowsAnyUiPermission(user.effectivePermissions, item.permissionAny, user.roles)),
   )
   useRealtime()
 
@@ -203,7 +202,7 @@ export function AppLayout() {
         </nav>
       </div>
 
-      {chatbotCapabilities.canUseChatbot && <ChatbotWidget />}
+      {allowsUiPermission(user.effectivePermissions, 'chatbot.use', user.roles) && <ChatbotWidget />}
     </div>
   )
 }

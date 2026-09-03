@@ -1,6 +1,7 @@
 import { useAuthStore } from '@/stores/authStore'
 import type { RoleCode, PermissionFlag } from '@/types'
 import { FEATURE_PERMS } from '@/constants/enums'
+import { allowsUiPermission } from '@/lib/permissionCompatibility'
 
 /**
  * Kiểm tra quyền theo catalog feature (FE ẩn UI). BE chặn API độc lập.
@@ -28,7 +29,7 @@ export function usePermissions() {
   }
 
   function hasPermission(permission: string): boolean {
-    return user?.effectivePermissions?.includes(permission) ?? false
+    return !!user && allowsUiPermission(user.effectivePermissions, permission, user.roles)
   }
 
   function hasRole(role: RoleCode): boolean {
