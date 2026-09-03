@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, ChevronDown, Pencil, Plus, Search, ShieldCheck, Users } from 'lucide-react'
 import { toast } from 'sonner'
@@ -9,7 +9,7 @@ import { togglePermission } from '@/lib/requestPermissionMatrix'
 import { useAuthStore } from '@/stores/authStore'
 import { Badge, Button, Card, CardHeader, EmptyState, Input, Modal, PageHeader, Select, Spinner } from '@/components/ui'
 import type { PermissionMatrixEntry, RoleCode, User } from '@/types'
-import { countPermissionChanges, groupPermissionRows } from './rolePermissionUiUtils'
+import { countPermissionChanges, groupPermissionRows, matchesNormalizedSearch } from './rolePermissionUiUtils'
 
 const ALL_ROLES: RoleCode[] = ['Employee', 'Manager', 'Accountant', 'HR', 'Director', 'Admin']
 const MATRIX_ROLES: RoleCode[] = ['Guest', ...ALL_ROLES]
@@ -30,9 +30,11 @@ export default function AdminRoles() {
   const [permissionQuery, setPermissionQuery] = useState('')
   const [accountQuery, setAccountQuery] = useState('')
   const [expandedModules, setExpandedModules] = useState<Set<string>>(new Set())
+  const matrixInitialized = useRef(false)
 
   useEffect(() => {
-    if (!matrix) return
+    if (!matrix || matrixInitialized.current) return
+    matrixInitialized.current = true
     const nextRows = matrix.permissions.map((row) => ({ ...row, roles: { ...row.roles } }))
     setMatrixVersion(matrix.version)
     setMatrixBaseline(nextRows.map((row) => ({ ...row, roles: { ...row.roles } })))
@@ -44,12 +46,11 @@ export default function AdminRoles() {
   const permissionGroups = useMemo(() => groupPermissionRows(matrixDraft, permissionQuery), [matrixDraft, permissionQuery])
   const changedPermissions = useMemo(() => countPermissionChanges(matrixBaseline, matrixDraft), [matrixBaseline, matrixDraft])
   const filteredUsers = useMemo(() => {
-    const query = accountQuery.trim().toLocaleLowerCase('vi')
-    if (!query) return users ?? []
+    if (!accountQuery.trim()) return users ?? []
     return (users ?? []).filter((user) => {
       const employeeName = employeeNames.get(user.employeeId) ?? ''
       const roles = user.roles.map((role) => ROLE_LABEL[role].label).join(' ')
-      return `${user.email} ${employeeName} ${roles}`.toLocaleLowerCase('vi').includes(query)
+      return matchesNormalizedSearch(`${user.email} ${employeeName} ${roles}`, accountQuery)
     })
   }, [accountQuery, employeeNames, users])
 
@@ -99,7 +100,7 @@ export default function AdminRoles() {
     <PageHeader title="Quản lý vai trò & quyền" subtitle="Phân quyền hệ thống và quản lý tài khoản tập trung"
       actions={activeTab === 'accounts' ? <Button icon={<Plus className="h-4 w-4" />} onClick={() => setCreating(true)}>Tạo tài khoản</Button> : undefined} />
 
-    <div className="mb-5 inline-flex w-full rounded-xl bg-slate-100 p-1 sm:w-auto" role="tablist" aria-label="Nội dung quản lý quyền">
+    <div className="mb-5 inline-flex w-full rounded-xl bg-slate-100 p-1 sm:w-auto" aria-label="Nội dung quản lý quyền">
       <TabButton active={activeTab === 'matrix'} onClick={() => setActiveTab('matrix')} icon={<ShieldCheck className="h-4 w-4" />} label="Ma trận quyền" count={matrixDraft.length} />
       <TabButton active={activeTab === 'accounts'} onClick={() => setActiveTab('accounts')} icon={<Users className="h-4 w-4" />} label="Tài khoản" count={users?.length ?? 0} />
     </div>
@@ -135,13 +136,13 @@ function PermissionMatrix({ groups, loading, version, total, query, onQuery, cha
       action={<Button size="sm" loading={saving} disabled={changed === 0} icon={<Check className="h-3.5 w-3.5" />} onClick={onSave}>{changed > 0 ? `Lưu ${changed} thay đổi` : 'Đã lưu'}</Button>} />
     <div className="flex flex-col gap-3 border-b border-slate-100 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
       <SearchBox value={query} onChange={onQuery} placeholder="Tìm tên hoặc mã quyền..." label="Tìm quyền" />
-      <div className="flex items-center justify-between gap-2 sm:justify-end"><span className="text-xs text-slate-500">{total} quyền · {changed} thay đổi</span><Button size="sm" variant="ghost" onClick={onCollapse}>Thu gọn</Button><Button size="sm" variant="ghost" onClick={onExpandAll}>Mở tất cả</Button></div>
+      <div className="flex items-center justify-between gap-2 sm:justify-end"><span className="text-xs text-slate-500">{total} quyền · {changed} thay đổi</span>{query.trim() ? <span className="text-xs font-medium text-brand-600">Đang lọc kết quả</span> : <><Button size="sm" variant="ghost" onClick={onCollapse}>Thu gọn</Button><Button size="sm" variant="ghost" onClick={onExpandAll}>Mở tất cả</Button></>}</div>
     </div>
     {loading ? <div className="p-5"><Spinner /></div> : groups.length === 0 ? <EmptyState icon={<Search className="h-6 w-6" />} title="Không tìm thấy quyền phù hợp" /> : (
       <div className="space-y-3 p-3 sm:p-4">{groups.map((group) => {
         const open = query.trim().length > 0 || expanded.has(group.module)
         return <section key={group.module} className="overflow-hidden rounded-xl border border-slate-200">
-          <button type="button" onClick={() => onToggleModule(group.module)} aria-expanded={open} className="flex w-full items-center justify-between gap-3 bg-slate-50 px-4 py-3 text-left transition hover:bg-slate-100">
+          <button type="button" disabled={query.trim().length > 0} onClick={() => onToggleModule(group.module)} aria-expanded={open} className="flex w-full items-center justify-between gap-3 bg-slate-50 px-4 py-3 text-left transition hover:bg-slate-100 disabled:cursor-default disabled:hover:bg-slate-50">
             <span><span className="block text-sm font-semibold text-slate-800">{group.label}</span><span className="mt-0.5 block text-xs text-slate-500">{group.rows.length} quyền</span></span>
             <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition ${open ? 'rotate-180' : ''}`} />
           </button>
@@ -175,7 +176,7 @@ function SearchBox({ value, onChange, placeholder, label }: { value: string; onC
 }
 
 function TabButton({ active, onClick, icon, label, count }: { active: boolean; onClick: () => void; icon: ReactNode; label: string; count: number }) {
-  return <button type="button" role="tab" aria-selected={active} onClick={onClick} className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition sm:flex-none ${active ? 'bg-white text-brand-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>{icon}<span>{label}</span><span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500">{count}</span></button>
+  return <button type="button" aria-pressed={active} onClick={onClick} className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition sm:flex-none ${active ? 'bg-white text-brand-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>{icon}<span>{label}</span><span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500">{count}</span></button>
 }
 
 function RolePicker({ roles, onChange }: { roles: RoleCode[]; onChange: (roles: RoleCode[]) => void }) {

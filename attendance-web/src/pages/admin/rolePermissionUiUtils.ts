@@ -12,7 +12,11 @@ const MODULE_LABELS: Record<string, string> = {
 }
 
 function normalizeSearch(value: string): string {
-  return value.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLocaleLowerCase('vi').trim()
+  return value.normalize('NFD').replace(/\p{Diacritic}/gu, '').replace(/đ/gi, (letter) => letter === 'Đ' ? 'D' : 'd').toLocaleLowerCase('vi').trim()
+}
+
+export function matchesNormalizedSearch(value: string, query: string): boolean {
+  return normalizeSearch(value).includes(normalizeSearch(query))
 }
 
 export function groupPermissionRows<T extends PermissionRowLike>(rows: T[], query: string) {
@@ -20,7 +24,7 @@ export function groupPermissionRows<T extends PermissionRowLike>(rows: T[], quer
   const groups = new Map<string, { module: string; label: string; rows: T[] }>()
   for (const row of rows) {
     const moduleLabel = MODULE_LABELS[row.module] ?? row.module
-    if (needle && !normalizeSearch(`${row.label} ${row.key} ${row.module} ${moduleLabel}`).includes(needle)) continue
+    if (needle && !matchesNormalizedSearch(`${row.label} ${row.key} ${row.module} ${moduleLabel}`, needle)) continue
     const group = groups.get(row.module) ?? { module: row.module, label: moduleLabel, rows: [] }
     group.rows.push(row)
     groups.set(row.module, group)
