@@ -138,6 +138,19 @@ test('leave type read and manage use explicit permissions', async () => {
   assert.equal(denied.status, 403)
 })
 
+test('employee self profile includes work catalog names without organization catalog permission', async () => {
+  setPermission('Employee', 'org.catalog.view', false)
+
+  const response = await fetch(`${baseUrl}/config/profile`, { headers: auth('employee') })
+  assert.equal(response.status, 200)
+
+  const profile = await response.json() as any
+  assert.equal(profile.departmentId, 'department')
+  assert.equal(profile.departmentName, 'Department')
+  assert.equal(profile.positionName, 'Employee')
+  assert.equal(profile.branchName, 'Main')
+})
+
 test('user creation rejects duplicate email and an employee already linked to an account', async () => {
   setPermission('Admin', 'config.user.manage', true)
   const duplicateEmail = await fetch(`${baseUrl}/config/roles/users`, {
