@@ -10,6 +10,7 @@ import { PeriodPicker } from '@/components/admin/widgets'
 import type { SummaryTimesheet } from '@/types'
 import { useAuthStore } from '@/stores/authStore'
 import { phase5Capabilities, shouldReloadFinancialState } from '@/lib/phase5Capabilities'
+import { allowsUiPermission } from '@/lib/permissionCompatibility'
 
 export default function AdminSummaryTimesheet() {
   const qc = useQueryClient()
@@ -20,6 +21,7 @@ export default function AdminSummaryTimesheet() {
   const [view, setView] = useState<SummaryTimesheet | null>(null)
   const user = useAuthStore((state) => state.user)!
   const capabilities = phase5Capabilities(user.effectivePermissions ?? [])
+  const canBuildSummary = allowsUiPermission(user.effectivePermissions, 'timesheet.summary.build', user.roles)
 
   const { data: list, isLoading } = useQuery({ queryKey: ['summary', 'list'], queryFn: () => timesheetApi.listSummary() })
 
@@ -57,7 +59,7 @@ export default function AdminSummaryTimesheet() {
     <div>
       <PageHeader title="Bảng công tổng hợp" subtitle="Tạo & xử lý bảng công theo kỳ (nửa tháng)" />
 
-      {capabilities.canBuildSummary && <Card className="mb-5">
+      {(capabilities.canBuildSummary || canBuildSummary) && <Card className="mb-5">
         <CardHeader title="Tạo bảng công mới" icon={<Plus className="h-4 w-4" />} />
         <CardBody>
           <div className="flex flex-wrap items-end justify-between gap-4">

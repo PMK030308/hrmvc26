@@ -5,6 +5,7 @@ import { api } from './http'
 import type {
   AttendanceRecord, Employee, SummaryTimesheet, Payslip, PayrollSheet,
 } from '@/types'
+import { normalizePayrollSheet, normalizeSummaryTimesheet } from '@/lib/financialApiCompatibility'
 
 export const timesheetApi = {
   detailed(params: { year: number; month: number; half?: 1 | 2; departmentId?: string }): Promise<{
@@ -13,11 +14,14 @@ export const timesheetApi = {
     return api.get('/timesheet/detailed', params)
   },
 
-  buildSummary(params: { year: number; month: number; half: 1 | 2 }): Promise<SummaryTimesheet> {
-    return api.post('/timesheet/build-summary', params)
+  async buildSummary(params: { year: number; month: number; half: 1 | 2 }): Promise<SummaryTimesheet> {
+    return normalizeSummaryTimesheet(await api.post('/timesheet/build-summary', params))
   },
 
-  listSummary(): Promise<SummaryTimesheet[]> { return api.get('/timesheet/list-summary') },
+  async listSummary(): Promise<SummaryTimesheet[]> {
+    const rows = await api.get<unknown[]>('/timesheet/list-summary')
+    return (Array.isArray(rows) ? rows : []).map(normalizeSummaryTimesheet)
+  },
 
   confirmByHr(id: string, expectedVersion: number): Promise<SummaryTimesheet> { return api.post(`/timesheet/confirm-by-hr/${id}`, { expectedVersion }) },
 
@@ -31,7 +35,9 @@ export const payrollApi = {
 
   byPeriod(period: string): Promise<Payslip | null> { return api.get(`/payroll/by-period/${period}`) },
 
-  sheet(period: string): Promise<PayrollSheet> { return api.get(`/payroll/sheet/${period}`) },
+  async sheet(period: string): Promise<PayrollSheet> {
+    return normalizePayrollSheet(await api.get(`/payroll/sheet/${period}`), period)
+  },
 
   periods(): Promise<string[]> { return api.get('/payroll/periods') },
 

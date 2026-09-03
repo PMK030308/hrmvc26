@@ -3,20 +3,23 @@
 // ============================================================================
 import { api } from './http'
 import type { AdminDashboard, AnyRequest, PayrollAggregate, SalaryFund, WorkHoursAvg, SalaryMonthly } from '@/types'
+import { normalizeDirectorPayroll, normalizeDirectorReport } from '@/lib/financialApiCompatibility'
 
 export const dashboardApi = {
   admin(): Promise<AdminDashboard> { return api.get('/dashboard/admin') },
 
   directorApprovals(): Promise<AnyRequest[]> { return api.get('/dashboard/director-approvals') },
 
-  directorPayrolls(): Promise<PayrollAggregate | null> { return api.get('/dashboard/director-payrolls') },
+  async directorPayrolls(): Promise<PayrollAggregate | null> {
+    return normalizeDirectorPayroll(await api.get('/dashboard/director-payrolls'))
+  },
 
   directorReports(from: string, to: string): Promise<{
     employees: { name: string; paidUnits: number; otHours: number; late: number; net?: number }[]
     payroll: { totalNet: number; totalGross: number } | null
     projection: 'attendance' | 'aggregate' | 'detail'
   }> {
-    return api.get('/dashboard/director-reports', { from, to })
+    return api.get('/dashboard/director-reports', { from, to }).then(normalizeDirectorReport)
   },
 
   /* ---- Dashboard mới: quỹ lương / giờ công TB / so sánh tháng ---- */

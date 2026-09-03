@@ -51,6 +51,7 @@ import AccountantPayroll from '@/pages/accountant/Payroll'
 import AccountantReports from '@/pages/accountant/Reports'
 // Shared
 import NotFoundPage from '@/pages/shared/NotFound'
+import RouteErrorFallback from '@/pages/shared/RouteErrorFallback'
 
 function IndexRedirect() {
   const user = useAuthStore.getState().user
@@ -69,6 +70,7 @@ export const router = createBrowserRouter([
   /* ----------------------------- Cổng nhân viên ---------------------------- */
   {
     element: <RequireAuth><RequireRole roles={['Employee', 'Manager', 'HR', 'Director', 'Admin', 'Accountant']}><AppLayout /></RequireRole></RequireAuth>,
+    errorElement: <RouteErrorFallback />,
     children: [
       { path: '/employee', element: <EmployeeHome /> },
       { path: '/employee/attendance', element: <AttendancePage /> },
@@ -93,12 +95,14 @@ export const router = createBrowserRouter([
   /* ------------------------------- Admin / HR ------------------------------ */
   {
     element: <RequireAuth><AppLayout /></RequireAuth>,
+    errorElement: <RouteErrorFallback />,
     children: [
       { path: '/admin/roles', element: <RequirePermission permission="config.permission.manage"><AdminRoles /></RequirePermission> },
     ],
   },
   {
     element: <RequireAuth><RequireRole roles={['HR', 'Admin']}><AppLayout /></RequireRole></RequireAuth>,
+    errorElement: <RouteErrorFallback />,
     children: [
       { path: '/admin/dashboard', element: <RequireAnyPermission permissions={['reports.attendance.view_scoped', 'reports.attendance.view_all']}><AdminDashboard /></RequireAnyPermission> },
       { path: '/admin/live', element: <AdminLive /> },
@@ -119,6 +123,7 @@ export const router = createBrowserRouter([
   /* ------------------------------- Accountant ------------------------------ */
   {
     element: <RequireAuth><RequireRole roles={['Accountant', 'Admin']}><AppLayout /></RequireRole></RequireAuth>,
+    errorElement: <RouteErrorFallback />,
     children: [
       { path: '/accountant/payroll', element: <RequirePermission permission="payroll.sheet.view"><AccountantPayroll /></RequirePermission> },
       { path: '/accountant/reports', element: <RequirePermission permission="reports.payroll.view_detail"><AccountantReports /></RequirePermission> },
@@ -128,6 +133,7 @@ export const router = createBrowserRouter([
   /* ------------------------------- Director -------------------------------- */
   {
     element: <RequireAuth><RequireRole roles={['Director', 'Admin']}><AppLayout /></RequireRole></RequireAuth>,
+    errorElement: <RouteErrorFallback />,
     children: [
       { path: '/director', element: <DirectorDashboard /> },
       { path: '/director/approvals', element: <DirectorApprovals /> },
