@@ -4,7 +4,6 @@ import { BadgeCheck, BriefcaseBusiness, Building2, CalendarDays, Camera, CheckCi
 import { toast } from 'sonner'
 import { authApi } from '@/api/auth'
 import { profileApi } from '@/api/config'
-import { orgApi } from '@/api/org'
 import { useAuthStore } from '@/stores/authStore'
 import { CONTRACT_LABEL, EMPLOYEE_STATUS_LABEL, GENDER_LABEL, ROLE_LABEL, WORK_NATURE_LABEL } from '@/constants/enums'
 import { fmtDate, yearsOfService } from '@/lib/date'
@@ -31,9 +30,6 @@ export default function ProfilePage() {
   const [passwords, setPasswords] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' })
 
   const { data: employee, isLoading, isError } = useQuery({ queryKey: ['profile'], queryFn: () => profileApi.get() })
-  const { data: departments = [] } = useQuery({ queryKey: ['departments'], queryFn: () => orgApi.departments() })
-  const { data: positions = [] } = useQuery({ queryKey: ['positions'], queryFn: () => orgApi.positions() })
-  const { data: branches = [] } = useQuery({ queryKey: ['branches'], queryFn: () => orgApi.branches() })
 
   const saveProfile = useMutation({
     mutationFn: (payload: ProfileForm) => profileApi.update({ ...payload, dateOfBirth: payload.dateOfBirth || null }),
@@ -108,9 +104,9 @@ export default function ProfilePage() {
   if (isError || !employee) return <Card><CardBody className="py-12 text-center text-sm text-danger-600">Không thể tải hồ sơ tài khoản. Vui lòng thử lại.</CardBody></Card>
 
   const shownAvatar = editing ? form?.avatarData : employee.avatarData
-  const department = departments.find((item) => item.id === employee.departmentId)?.name ?? 'Chưa cập nhật'
-  const position = positions.find((item) => item.id === employee.positionId)?.name ?? 'Chưa cập nhật'
-  const branch = branches.find((item) => item.id === employee.branchId)?.name ?? 'Chưa cập nhật'
+  const department = employee.departmentName ?? 'Chưa cập nhật'
+  const position = employee.positionName ?? 'Chưa cập nhật'
+  const branch = employee.branchName ?? 'Chưa cập nhật'
 
   return <div className="space-y-5">
     <section className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-brand-700 via-brand-600 to-info-600 p-5 text-white shadow-card sm:p-7">

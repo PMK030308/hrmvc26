@@ -132,6 +132,12 @@ export interface Employee {
   wage: number
 }
 
+export interface EmployeeProfile extends Employee {
+  departmentName: string | null
+  positionName: string | null
+  branchName: string | null
+}
+
 export type EmployeeProjection = Pick<Employee,
   'id' | 'employeeCode' | 'fullName' | 'email' | 'status' | 'avatarData' | 'managerId' | 'departmentId' | 'positionId' | 'branchId'
 > & Partial<Pick<Employee,

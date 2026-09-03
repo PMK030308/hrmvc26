@@ -2,7 +2,7 @@
 // API — Cấu hình & quy định (§11) + Role/permission (§11.3) + Profile (§9) — HTTP.
 // ============================================================================
 import { api } from './http'
-import type { AttendanceRegulation, LeaveType, User, Employee, RoleCode, PermissionMatrixSnapshot } from '@/types'
+import type { AttendanceRegulation, LeaveType, User, Employee, EmployeeProfile, RoleCode, PermissionMatrixSnapshot } from '@/types'
 
 export const regulationsApi = {
   attendance(): Promise<AttendanceRegulation> { return api.get('/config/regulations/attendance') },
@@ -32,6 +32,6 @@ export const rolesApi = {
 }
 
 export const profileApi = {
-  get(): Promise<Employee> { return api.get('/config/profile') },
-  update(payload: Partial<Employee>): Promise<Employee> { return api.put('/config/profile', payload) },
+  get(): Promise<EmployeeProfile> { return api.get('/config/profile') },
+  update(payload: Partial<Employee>): Promise<EmployeeProfile> { return api.put('/config/profile', payload) },
 }

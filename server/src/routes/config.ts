@@ -3,7 +3,7 @@ import { Router } from 'express'
 import { z } from 'zod'
 import { db } from '../db.js'
 import { requireAuth, requirePermission, type AuthedRequest } from '../middleware/auth.js'
-import { getRegulation, mapRegulation, getEmployee, getUserById, mapUser, uid } from '../repo.js'
+import { getRegulation, mapRegulation, getEmployee, getUserById, mapEmployee, mapUser, uid } from '../repo.js'
 import { httpError } from '../types.js'
 import { pushAudit } from '../helpers.js'
 import { validateAvatarData } from '../services/mediaValidation.js'
@@ -209,11 +209,31 @@ configRouter.post('/roles/users', requireAuth, requirePermission('config.user.ma
 })
 
 /* ------------------------------- Profile ---------------------------------- */
+function getEmployeeProfile(employeeId: string) {
+  const row = db.prepare(`SELECT e.*,
+    d.name AS department_name,
+    p.name AS position_name,
+    b.name AS branch_name
+    FROM employees e
+    LEFT JOIN departments d ON d.id=e.department_id
+    LEFT JOIN positions p ON p.id=e.position_id
+    LEFT JOIN branches b ON b.id=e.branch_id
+    WHERE e.id=?`).get(employeeId) as any
+  if (!row) return null
+
+  return {
+    ...mapEmployee(row),
+    departmentName: row.department_name == null ? null : String(row.department_name),
+    positionName: row.position_name == null ? null : String(row.position_name),
+    branchName: row.branch_name == null ? null : String(row.branch_name),
+  }
+}
+
 configRouter.get('/profile', requireAuth, (req: AuthedRequest, res, next) => {
   try {
-    const e = getEmployee(req.user!.employeeId)
-    if (!e) throw httpError(404, 'Không tìm thấy hồ sơ.')
-    res.json(e)
+    const profile = getEmployeeProfile(req.user!.employeeId)
+    if (!profile) throw httpError(404, 'Không tìm thấy hồ sơ.')
+    res.json(profile)
   } catch (e) { next(e) }
 })
 
@@ -234,6 +254,6 @@ configRouter.put('/profile', requireAuth, (req: AuthedRequest, res, next) => {
     }
     if (sets.length) { vals.push(e.id); db.prepare(`UPDATE employees SET ${sets.join(',')} WHERE id=?`).run(...vals) }
     pushAudit(req.user!.id, req.user!.email, 2, 'Employee', e.id, 'Tự cập nhật hồ sơ')
-    res.json(getEmployee(e.id))
+    res.json(getEmployeeProfile(e.id))
   } catch (e) { next(e) }
 })
