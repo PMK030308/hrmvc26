@@ -12,7 +12,7 @@ import {
   getActiveDelegation, getRegulation,
 } from '../repo.js'
 import { recomputeRecord } from './attendance.js'
-import { workingDays, calendarDays, parseISO, isoNow, ymd, nowVn } from '../lib/date.js'
+import { workingDays, calendarDays, parseISO, isoNow, ymd, nowVn, timeStrToMinutes } from '../lib/date.js'
 import { pushAudit } from '../helpers.js'
 import {
   REQUEST_PERMISSIONS, canApproveCurrentStep, canCancelRequest, canManageRequestAttachment, canModifyRequest, canRespondToShiftSwap,
@@ -210,11 +210,17 @@ export function createRequest(userId: string, type: RequestType, payload: any): 
     cols.push('request_date', 'late_early_type', 'requested_time', 'minutes', 'reason')
     vals.push(payload.requestDate, payload.lateEarlyType, payload.requestedTime, payload.minutes, payload.reason)
   } else if (type === 'overtimes') {
-    const totalHours = computeOtHours(payload.startTime, payload.endTime)
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(payload.otDate ?? ''))) throw httpError(400, 'Ngày làm thêm không hợp lệ.')
+    const st = String(payload.startTime ?? '').trim()
+    const et = String(payload.endTime ?? '').trim()
+    if (!/^\d{2}:\d{2}(:\d{2})?$/.test(st)) throw httpError(400, 'Giờ bắt đầu OT không hợp lệ.')
+    if (!/^\d{2}:\d{2}(:\d{2})?$/.test(et)) throw httpError(400, 'Giờ kết thúc OT không hợp lệ.')
+    const totalHours = computeOtHours(st, et)
+    if (totalHours <= 0) throw httpError(400, 'Giờ kết thúc OT phải sau giờ bắt đầu.')
     // Enforce cap OT theo luật (regulation.otMonthlyCapHours / otYearlyCapHours).
     enforceOtCap(emp.id, payload.otDate, totalHours)
     cols.push('ot_date', 'start_time', 'end_time', 'total_hours', 'compensation_type', 'reason')
-    vals.push(payload.otDate, payload.startTime, payload.endTime, totalHours, payload.compensationType, payload.reason)
+    vals.push(payload.otDate, st, et, totalHours, payload.compensationType, payload.reason)
   } else if (type === 'business-trips') {
     const totalDays = workingDays(parseISO(payload.startDate), parseISO(payload.endDate))
     cols.push('start_date', 'end_date', 'total_days', 'location', 'purpose')
@@ -226,8 +232,20 @@ export function createRequest(userId: string, type: RequestType, payload: any): 
     vals.push(payload.requestedDate, mode, payload.suggestedSwapPartnerId ?? null, partner?.fullName ?? null, mode === 2 ? 1 : 0, payload.reason)
     if (mode === 2) { status = 6; canRespond = true }
   } else {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(payload.requestDate ?? ''))) throw httpError(400, 'Ngày cập nhật công không hợp lệ.')
+    const ut = Number(payload.updateType)
+    if (ut !== 1 && ut !== 2 && ut !== 3) throw httpError(400, 'Loại cập nhật công không hợp lệ.')
+    let cin: string | null = null, cout: string | null = null
+    if (ut !== 3) {
+      cin = payload.newCheckInTime ? String(payload.newCheckInTime).trim() : ''
+      cout = payload.newCheckOutTime ? String(payload.newCheckOutTime).trim() : ''
+      if (!/^\d{2}:\d{2}(:\d{2})?$/.test(cin)) throw httpError(400, 'Giờ vào mới không hợp lệ.')
+      if (!/^\d{2}:\d{2}(:\d{2})?$/.test(cout)) throw httpError(400, 'Giờ ra mới không hợp lệ.')
+      const cinMin = timeStrToMinutes(cin), coutMin = timeStrToMinutes(cout)
+      if (cinMin !== null && coutMin !== null && coutMin <= cinMin) throw httpError(400, 'Giờ ra mới phải sau giờ vào.')
+    }
     cols.push('request_date', 'update_type', 'new_check_in_time', 'new_check_out_time', 'new_work_hours', 'reason')
-    vals.push(payload.requestDate, payload.updateType, payload.newCheckInTime ?? null, payload.newCheckOutTime ?? null, payload.newWorkHours ?? null, payload.reason)
+    vals.push(payload.requestDate, ut, ut !== 3 ? (cin || null) : null, ut !== 3 ? (cout || null) : null, payload.newWorkHours ?? null, payload.reason)
   }
 
   if (status !== base.status) { vals[cols.indexOf('status')] = status }

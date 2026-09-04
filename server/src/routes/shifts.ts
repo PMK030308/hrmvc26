@@ -5,7 +5,7 @@ import { requireAuth, requirePermission, type AuthedRequest } from '../middlewar
 import { allShifts, getEmployee, getShift, mapShift, mapShiftSchedule, uid } from '../repo.js'
 import { httpError } from '../types.js'
 import { pushAudit } from '../helpers.js'
-import { recomputeAll } from '../engines/attendance.js'
+import { recomputeAll, recomputeRecord } from '../engines/attendance.js'
 import { ymd, eachDayOfInterval } from '../lib/date.js'
 import { canManageShiftSchedule, canViewShiftSchedule, SHIFT_PERMISSIONS } from '../authz/shiftAuthorization.js'
 
@@ -15,15 +15,24 @@ shiftsRouter.get('/', requireAuth, requirePermission(SHIFT_PERMISSIONS.CATALOG_V
   res.json(allShifts())
 })
 
-shiftsRouter.post('/', requireAuth, requirePermission(SHIFT_PERMISSIONS.CATALOG_MANAGE), (req: AuthedRequest, res) => {
-  const p = req.body ?? {}
+shiftsRouter.post('/', requireAuth, requirePermission(SHIFT_PERMISSIONS.CATALOG_MANAGE), (req: AuthedRequest, res, next) => {
+  try {
+    const p = req.body ?? {}
+    const code = typeof p.code === 'string' ? p.code.trim() : ''
+    const name = typeof p.name === 'string' ? p.name.trim() : ''
+    const startTime = typeof p.startTime === 'string' ? p.startTime.trim() : ''
+    const endTime = typeof p.endTime === 'string' ? p.endTime.trim() : ''
+    if (!code) throw httpError(400, 'Vui lòng nhập mã ca.')
+    if (!name) throw httpError(400, 'Vui lòng nhập tên ca.')
+    if (!startTime || !/^\d{2}:\d{2}(:\d{2})?$/.test(startTime)) throw httpError(400, 'Giờ bắt đầu không hợp lệ.')
+    if (!endTime || !/^\d{2}:\d{2}(:\d{2})?$/.test(endTime)) throw httpError(400, 'Giờ kết thúc không hợp lệ.')
   const id = uid('shift')
   db.prepare(`INSERT INTO shifts (id, code, name, start_time, end_time, break_start_time, break_end_time,
     check_in_window_from, check_in_window_to, check_out_window_from, check_out_window_to,
     late_punishment_enabled, late_punishment_times, late_punishment_minutes_each, work_days,
     is_overnight, status, holiday_coefficient, color)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-    id, p.code ?? 'NEW', p.name ?? 'Ca mới', p.startTime ?? '08:00:00', p.endTime ?? '17:00:00',
+    id, code, name, startTime.length === 5 ? `${startTime}:00` : startTime, endTime.length === 5 ? `${endTime}:00` : endTime,
     p.breakStartTime ?? null, p.breakEndTime ?? null, p.checkInWindowFrom ?? null, p.checkInWindowTo ?? null,
     p.checkOutWindowFrom ?? null, p.checkOutWindowTo ?? null, p.latePunishmentEnabled ? 1 : 0,
     p.latePunishmentTimes ?? 0, p.latePunishmentMinutesEach ?? 0, p.workDays ?? 1, p.isOvernight ? 1 : 0,
@@ -31,6 +40,7 @@ shiftsRouter.post('/', requireAuth, requirePermission(SHIFT_PERMISSIONS.CATALOG_
   const s = getShift(id)!
   pushAudit(req.user!.id, req.user!.email, 1, 'Shift', s.id, `Tạo ca ${s.name}`)
   res.json(s)
+  } catch (error) { next(error) }
 })
 
 shiftsRouter.put('/:id', requireAuth, requirePermission(SHIFT_PERMISSIONS.CATALOG_MANAGE), (req: AuthedRequest, res, next) => {
@@ -39,6 +49,10 @@ shiftsRouter.put('/:id', requireAuth, requirePermission(SHIFT_PERMISSIONS.CATALO
     const s = getShift(req.params.id)
     if (!s) throw httpError(404, 'Không tìm thấy ca.')
     const p = req.body ?? {}
+    if ('code' in p && (typeof p.code !== 'string' || !p.code.trim())) throw httpError(400, 'Mã ca không được để trống.')
+    if ('name' in p && (typeof p.name !== 'string' || !p.name.trim())) throw httpError(400, 'Tên ca không được để trống.')
+    if ('startTime' in p && (typeof p.startTime !== 'string' || !/^\d{2}:\d{2}(:\d{2})?$/.test(p.startTime.trim()))) throw httpError(400, 'Giờ bắt đầu không hợp lệ.')
+    if ('endTime' in p && (typeof p.endTime !== 'string' || !/^\d{2}:\d{2}(:\d{2})?$/.test(p.endTime.trim()))) throw httpError(400, 'Giờ kết thúc không hợp lệ.')
     const map: Record<string, string> = {
       code: 'code', name: 'name', startTime: 'start_time', endTime: 'end_time',
       breakStartTime: 'break_start_time', breakEndTime: 'break_end_time',
@@ -48,7 +62,11 @@ shiftsRouter.put('/:id', requireAuth, requirePermission(SHIFT_PERMISSIONS.CATALO
       workDays: 'work_days', status: 'status', holidayCoefficient: 'holiday_coefficient', color: 'color',
     }
     const sets: string[] = [], vals: any[] = []
-    for (const k of Object.keys(map)) if (k in p) { sets.push(`${map[k]}=?`); vals.push(p[k]) }
+    for (const k of Object.keys(map)) if (k in p) {
+      const raw = p[k]
+      sets.push(`${map[k]}=?`)
+      vals.push((k === 'code' || k === 'name') ? raw.trim() : raw)
+    }
     if ('latePunishmentEnabled' in p) { sets.push('late_punishment_enabled=?'); vals.push(p.latePunishmentEnabled ? 1 : 0) }
     if ('isOvernight' in p) { sets.push('is_overnight=?'); vals.push(p.isOvernight ? 1 : 0) }
     if (sets.length) { vals.push(req.params.id); db.prepare(`UPDATE shifts SET ${sets.join(',')} WHERE id=?`).run(...vals) }
@@ -113,7 +131,9 @@ shiftsRouter.post('/assign', requireAuth, (req: AuthedRequest, res, next) => {
       if (shiftId && !getShift(shiftId)) throw httpError(404, 'Không tìm thấy ca.')
       db.prepare('DELETE FROM shift_schedules WHERE employee_id=? AND date=?').run(employeeId, date)
       if (shiftId) db.prepare('INSERT INTO shift_schedules (id, employee_id, shift_id, date, rule_id, is_active) VALUES (?,?,?,?,NULL,1)').run(uid('sch'), employeeId, shiftId, date)
-      recomputeAll(employeeId)
+      // Chỉ tính lại bản ghi của ngày bị thay đổi (recomputeRecord chỉ phụ thuộc ca của chính ngày đó,
+      // punch checkout qua đêm được lưu cùng ngày check-in) — tránh recomputeAll toàn bộ lịch sử.
+      recomputeRecord(employeeId, date)
       pushAudit(req.user!.id, req.user!.email, 2, 'ShiftSchedule', null, `Phân ca ${employeeId} ${date}`)
     })()
     res.json({ ok: true })
@@ -133,11 +153,14 @@ shiftsRouter.post('/bulk-assign', requireAuth, (req: AuthedRequest, res, next) =
         throw httpError(404, 'Một hoặc nhiều nhân viên không tồn tại trong effective scope.')
       }
       for (const target of targets) {
+        const seen = new Set<string>()
         for (const date of dates) {
           db.prepare('DELETE FROM shift_schedules WHERE employee_id=? AND date=?').run(target!.id, date)
           db.prepare('INSERT INTO shift_schedules (id, employee_id, shift_id, date, rule_id, is_active) VALUES (?,?,?,?,NULL,1)').run(uid('sch'), target!.id, shiftId, date)
+          seen.add(date)
         }
-        recomputeAll(target!.id)
+        // Chỉ tính lại các ngày thực sự bị thay đổi thay vì toàn bộ lịch sử.
+        for (const date of seen) recomputeRecord(target!.id, date)
       }
       pushAudit(req.user!.id, req.user!.email, 2, 'ShiftSchedule', null, `Phân ca hàng loạt (${employeeIds.length} NV)`)
     })()
