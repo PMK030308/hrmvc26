@@ -34,7 +34,14 @@ const TOOL_DECLARATIONS: Record<ChatbotToolName, FunctionDeclaration> = {
     name: 'propose_create_request', description: 'Chuẩn bị bản xem trước đơn; chưa ghi dữ liệu cho đến khi người dùng xác nhận.',
     parameters: {
       type: 'object', required: ['requestType', 'fields'],
-      properties: { requestType: { type: 'string' }, fields: { type: 'object' } },
+      properties: {
+        requestType: {
+          type: 'string',
+          enum: ['leaves', 'late-earlies', 'overtimes', 'business-trips', 'shift-swaps', 'attendance-updates'],
+          description: 'Loại đơn (dùng CHÍNH XÁC các key này): leaves = nghỉ phép; late-earlies = đi muộn/về sớm; overtimes = làm thêm (OT); business-trips = công tác; shift-swaps = đổi ca; attendance-updates = cập nhật công.',
+        },
+        fields: { type: 'object' },
+      },
     },
   },
   search_employees: {
@@ -197,7 +204,9 @@ export async function executeAuthorizedTool(
       if (!options.buildRequestDraft) throw httpError(503, 'Chức năng tạo bản nháp chưa sẵn sàng.')
       const result = options.buildRequestDraft(String(args.requestType), args.fields, freshActor)
       if (!result.ok) return { error: `Thiếu thông tin: ${result.errors.join(', ')}.`, missing: result.errors }
-      const draft = { requestType: args.requestType, fields: result.payload, summary: result.summary }
+      // result.summary.requestType là key chuẩn đã được buildPayload chuẩn hoá; dùng nó cho draft
+      // để nút "Tạo đơn" gửi đúng key mà /chatbot/create chấp nhận.
+      const draft = { requestType: result.summary.requestType ?? args.requestType, fields: result.payload, summary: result.summary }
       options.onDraft?.(draft)
       return { ok: true, preview: result.summary, note: 'Đã chuẩn bị bản nháp. Cần người dùng xác nhận trước khi tạo.' }
     }

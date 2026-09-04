@@ -30,6 +30,19 @@ const REQUEST_TYPE_LABEL: Record<string, string> = {
   leaves: 'nghỉ phép', 'late-earlies': 'đi muộn/về sớm', overtimes: 'làm thêm (OT)',
   'business-trips': 'công tác', 'shift-swaps': 'đổi ca', 'attendance-updates': 'cập nhật công',
 }
+/** Chuẩn hoá loại đơn về key chuẩn (leaves, late-earlies, ...). Chấp nhận key chuẩn hoặc nhãn/alias tiếng Việt. */
+function normalizeRequestType(input: unknown): string | null {
+  if (!input) return null
+  const v = String(input).trim().toLowerCase()
+  if (VALID_TYPES.includes(v)) return v
+  if (v === 'leave' || v.includes('nghỉ') || v.includes('nghi')) return 'leaves'
+  if (v.includes('muộn') || v.includes('muon') || v.includes('sớm') || v.includes('som')) return 'late-earlies'
+  if (v === 'ot' || v.includes('làm thêm') || v.includes('lam them') || v.includes('tăng ca') || v.includes('tang ca')) return 'overtimes'
+  if (v.includes('công tác') || v.includes('cong tac')) return 'business-trips'
+  if (v.includes('đổi ca') || v.includes('doi ca')) return 'shift-swaps'
+  if (v.includes('cập nhật công') || v.includes('cap nhat cong') || v.includes('sửa công') || v.includes('sua cong')) return 'attendance-updates'
+  return null
+}
 /* ----------------------------- Tiện ích ----------------------------------- */
 /** Chuẩn hoá ngày về YYYY-MM-DD (chấp nhận dd/mm/yyyy, dd-mm-yyyy, hoặc ISO). */
 function normalizeDate(input: any): string | null {
@@ -61,6 +74,11 @@ function resolveLeaveTypeByName(name: any): any | null {
 function buildPayload(type: string, f: Record<string, any>, actor?: AuthorizationActor): FieldErrors {
   const errors: string[] = []
   const payload: Record<string, any> = {}
+  const normalizedType = normalizeRequestType(type)
+  if (!normalizedType) {
+    return { ok: false, payload, errors: ['loại đơn (nghỉ phép, muộn/sớm, làm thêm, công tác, đổi ca, cập nhật công)'], summary: { requestType: type, typeLabel: type } }
+  }
+  type = normalizedType
   const summary: Record<string, any> = { requestType: type, typeLabel: REQUEST_TYPE_LABEL[type] ?? type }
 
   if (type === 'leaves') {
@@ -162,6 +180,7 @@ function buildSystemPrompt(user: AuthedRequest['user']): string {
     '',
     'Quy ước:',
     '- Khi người dùng muốn tạo đơn, hãy thu thập đủ thông tin rồi gọi tool propose_create_request. Định dạng ngày YYYY-MM-DD, giờ HH:mm.',
+    '- QUAN TRỌNG: tham số requestType phải là một trong các key chuẩn: "leaves" (nghỉ phép), "late-earlies" (đi muộn/về sớm), "overtimes" (làm thêm/OT), "business-trips" (công tác), "shift-swaps" (đổi ca), "attendance-updates" (cập nhật công). KHÔNG dùng tiếng Việt làm requestType.',
     `- Các loại nghỉ phép sẵn có: ${leaveTypes}.`,
     '- Sau khi propose thành công, trình bày tóm tắt nội dung đơn (dựa vào preview) và bảo người dùng bấm "Tạo đơn" để xác nhận.',
     '- Nếu thiếu thông tin bắt buộc, ĐỪNG gọi propose_create_request mà hãy hỏi người dùng.',
@@ -207,16 +226,17 @@ chatbotRouter.post('/', requireAuth, requirePermission(CHATBOT_PERMISSIONS.USE),
 chatbotRouter.post('/create', requireAuth, requirePermission(CHATBOT_PERMISSIONS.USE), requirePermission(CHATBOT_PERMISSIONS.REQUEST_CREATE_SELF), requirePermission(REQUEST_PERMISSIONS.CREATE_OWN), async (req: AuthedRequest, res, next) => {
   try {
     const { requestType, fields } = req.body ?? {}
-    if (!VALID_TYPES.includes(requestType)) return next(httpError(400, 'Loại đơn không hợp lệ.'))
-    const r = buildPayload(requestType, fields ?? {}, req.authorizationActor!)
+    const normalizedType = normalizeRequestType(requestType)
+    if (!normalizedType) return next(httpError(400, 'Loại đơn không hợp lệ.'))
+    const r = buildPayload(normalizedType, fields ?? {}, req.authorizationActor!)
     if (!r.ok) return next(httpError(400, `Thiếu thông tin: ${r.errors.join(', ')}.`))
-    const q = createRequest(req.user!.id, requestType as any, r.payload)
+    const q = createRequest(req.user!.id, normalizedType as any, r.payload)
     const emp = getEmployee(req.user!.employeeId)!
-    pushAudit(req.user!.id, emp.fullName, 1, 'Request', q.id, `Tạo ${requestType} qua chatbot (#${q.id.slice(-6)})`)
+    pushAudit(req.user!.id, emp.fullName, 1, 'Request', q.id, `Tạo ${normalizedType} qua chatbot (#${q.id.slice(-6)})`)
     res.json({
       ok: true,
       request: mapRequest(db.prepare('SELECT * FROM requests WHERE id=?').get(q.id) as any),
-      reply: `✅ Đã tạo ${REQUEST_TYPE_LABEL[requestType]}. Mã đơn #${q.id.slice(-6)}, trạng thái: ${REQUEST_STATUS_LABEL[q.status] ?? q.status}. Đơn đang chờ duyệt.`,
+      reply: `✅ Đã tạo ${REQUEST_TYPE_LABEL[normalizedType]}. Mã đơn #${q.id.slice(-6)}, trạng thái: ${REQUEST_STATUS_LABEL[q.status] ?? q.status}. Đơn đang chờ duyệt.`,
     })
   } catch (e: any) {
     next(httpError(e?.status ?? 500, e?.message ?? 'Lỗi tạo đơn qua chatbot.'))
