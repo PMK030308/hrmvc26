@@ -61,8 +61,10 @@ export async function generateContent(
   }
 
   if (!res.ok) {
-    await res.arrayBuffer().catch(() => undefined)
-    throw new Error(`Nhà cung cấp chatbot trả lỗi ${res.status}.`)
+    const buf = await res.arrayBuffer().catch(() => undefined)
+    let detail = ''
+    try { detail = buf ? new TextDecoder().decode(buf) : '' } catch { detail = '' }
+    throw new Error(`Nhà cung cấp chatbot trả lỗi ${res.status}. ${detail.slice(0, 500)}`.trim())
   }
   const data = await res.json()
   const cand = data?.candidates?.[0]

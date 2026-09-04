@@ -218,7 +218,9 @@ chatbotRouter.post('/', requireAuth, requirePermission(CHATBOT_PERMISSIONS.USE),
     res.json({ reply: reply || '(không có phản hồi)', draft })
   } catch (e: any) {
     if (e?.status) return next(e)
-    next(httpError(502, 'Dịch vụ chatbot tạm thời không khả dụng.'))
+    console.error('[CHATBOT]', e)
+    const detail = e?.message ? `: ${e.message}` : '.'
+    next(httpError(502, `Dịch vụ chatbot tạm thời không khả dụng${detail}`))
   }
 })
 
