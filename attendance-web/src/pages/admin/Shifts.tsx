@@ -20,11 +20,27 @@ export default function AdminShifts() {
   const canManage = hasPermission('shifts.catalog.manage')
   const qc = useQueryClient()
   const [editing, setEditing] = useState<Partial<Shift> | null>(null)
+  const [errors, setErrors] = useState<Partial<Record<keyof Shift, string>>>({})
   const [del, setDel] = useState<Shift | null>(null)
   const { data: shifts, isLoading } = useQuery({ queryKey: ['shifts', 'list'], queryFn: () => shiftsApi.list() })
 
+  function validate(s: Partial<Shift>): Partial<Record<keyof Shift, string>> {
+    const e: Partial<Record<keyof Shift, string>> = {}
+    if (!s.code || !s.code.trim()) e.code = 'Vui lòng nhập mã ca.'
+    if (!s.name || !s.name.trim()) e.name = 'Vui lòng nhập tên ca.'
+    if (!s.startTime) e.startTime = 'Vui lòng nhập giờ bắt đầu.'
+    if (!s.endTime) e.endTime = 'Vui lòng nhập giờ kết thúc.'
+    if (s.startTime && s.endTime && !s.isOvernight && s.startTime >= s.endTime) {
+      e.endTime = 'Giờ kết thúc phải sau giờ bắt đầu (hoặc bật ca qua đêm).'
+    }
+    return e
+  }
+
   const save = useMutation({
     mutationFn: (s: Partial<Shift>) => {
+      const e = validate(s)
+      setErrors(e)
+      if (Object.keys(e).length) throw new Error(Object.values(e).join(' · '))
       const p: Partial<Shift> = {
         ...s,
         startTime: toSec(s.startTime ?? '') ?? '08:00:00', endTime: toSec(s.endTime ?? '') ?? '17:00:00',
@@ -34,7 +50,7 @@ export default function AdminShifts() {
       }
       return editing?.id ? shiftsApi.update(editing.id, p) : shiftsApi.create(p)
     },
-    onSuccess: () => { toast.success(editing?.id ? 'Đã cập nhật ca' : 'Đã tạo ca'); setEditing(null); qc.invalidateQueries({ queryKey: ['shifts'] }) },
+    onSuccess: () => { toast.success(editing?.id ? 'Đã cập nhật ca' : 'Đã tạo ca'); setEditing(null); setErrors({}); qc.invalidateQueries({ queryKey: ['shifts'] }) },
     onError: (e: Error) => toast.error(e.message),
   })
   const remove = useMutation({
@@ -46,7 +62,7 @@ export default function AdminShifts() {
   return (
     <div>
       <PageHeader title="Ca làm việc" subtitle="Định nghĩa ca & cửa sổ chấm công" actions={canManage ?
-        <Button icon={<Plus className="h-4 w-4" />} onClick={() => setEditing({ ...blank })}>Thêm ca</Button>
+        <Button icon={<Plus className="h-4 w-4" />} onClick={() => { setErrors({}); setEditing({ ...blank }) }}>Thêm ca</Button>
       : undefined} />
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -57,7 +73,7 @@ export default function AdminShifts() {
               <div className="h-1.5" style={{ background: s.color }} />
               <CardHeader title={s.name} subtitle={s.code} icon={<Clock className="h-4 w-4" />} action={canManage ?
                 <div className="flex gap-1">
-                  <button onClick={() => setEditing(s)} className="grid h-8 w-8 place-items-center rounded-lg text-slate-500 hover:bg-slate-100"><Pencil className="h-4 w-4" /></button>
+                  <button onClick={() => { setErrors({}); setEditing(s) }} className="grid h-8 w-8 place-items-center rounded-lg text-slate-500 hover:bg-slate-100"><Pencil className="h-4 w-4" /></button>
                   <button onClick={() => setDel(s)} className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-danger-50 hover:text-danger-600"><Trash2 className="h-4 w-4" /></button>
                 </div> : undefined
               } />
@@ -75,10 +91,10 @@ export default function AdminShifts() {
           ))}
       </div>
 
-      <Modal open={canManage && !!editing} onClose={() => setEditing(null)} size="lg"
+      <Modal open={canManage && !!editing} onClose={() => { setEditing(null); setErrors({}) }} size="lg"
         title={editing?.id ? 'Sửa ca' : 'Thêm ca'}
-        footer={<><Button variant="secondary" onClick={() => setEditing(null)}>Hủy</Button><Button loading={save.isPending} onClick={() => save.mutate(editing!)}>Lưu</Button></>}>
-        {editing && <ShiftForm value={editing} onChange={setEditing} />}
+        footer={<><Button variant="secondary" onClick={() => { setEditing(null); setErrors({}) }}>Hủy</Button><Button loading={save.isPending} onClick={() => save.mutate(editing!)}>Lưu</Button></>}>
+        {editing && <ShiftForm value={editing} onChange={setEditing} errors={errors} />}
       </Modal>
 
       <ConfirmDialog open={canManage && !!del} onClose={() => setDel(null)} danger title="Xóa ca"
@@ -88,15 +104,15 @@ export default function AdminShifts() {
   )
 }
 
-function ShiftForm({ value, onChange }: { value: Partial<Shift>; onChange: (v: Partial<Shift>) => void }) {
+function ShiftForm({ value, onChange, errors }: { value: Partial<Shift>; onChange: (v: Partial<Shift>) => void; errors?: Partial<Record<keyof Shift, string>> }) {
   const set = (k: keyof Shift, v: any) => onChange({ ...value, [k]: v })
   const t = (v: string | null | undefined) => (v ?? '').slice(0, 5)
   return (
     <div className="grid grid-cols-2 gap-4">
-      <Input label="Tên ca" value={value.name ?? ''} onChange={(e) => set('name', e.target.value)} />
-      <Input label="Mã ca" value={value.code ?? ''} onChange={(e) => set('code', e.target.value)} />
-      <Input label="Giờ bắt đầu" type="time" value={t(value.startTime)} onChange={(e) => set('startTime', e.target.value)} />
-      <Input label="Giờ kết thúc" type="time" value={t(value.endTime)} onChange={(e) => set('endTime', e.target.value)} />
+      <Input label="Tên ca" value={value.name ?? ''} error={errors?.name} onChange={(e) => set('name', e.target.value)} />
+      <Input label="Mã ca" value={value.code ?? ''} error={errors?.code} onChange={(e) => set('code', e.target.value)} />
+      <Input label="Giờ bắt đầu" type="time" value={t(value.startTime)} error={errors?.startTime} onChange={(e) => set('startTime', e.target.value)} />
+      <Input label="Giờ kết thúc" type="time" value={t(value.endTime)} error={errors?.endTime} onChange={(e) => set('endTime', e.target.value)} />
       <Input label="Nghỉ từ" type="time" value={t(value.breakStartTime)} onChange={(e) => set('breakStartTime', e.target.value)} />
       <Input label="Nghỉ đến" type="time" value={t(value.breakEndTime)} onChange={(e) => set('breakEndTime', e.target.value)} />
       <Input label="Chấm vào từ" type="time" value={t(value.checkInWindowFrom)} onChange={(e) => set('checkInWindowFrom', e.target.value)} />

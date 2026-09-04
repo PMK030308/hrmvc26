@@ -149,6 +149,14 @@ function OvertimeForm({ catalog, submitting, onSubmit }: { catalog: any; submitt
   const overMonth = !!usage && monthProj > usage.monthCap
   const overYear = !!usage && yearProj > usage.yearCap
   const overCap = overMonth || overYear
+  const timeInvalid = !startTime || !endTime || startTime === endTime
+  function submitOt() {
+    if (!otDate) return toast.error('Vui lòng chọn ngày làm thêm.')
+    if (!startTime || !endTime) return toast.error('Vui lòng nhập giờ bắt đầu và giờ kết thúc.')
+    if (startTime === endTime) return toast.error('Giờ kết thúc OT phải sau giờ bắt đầu.')
+    if (hours <= 0) return toast.error('Tổng giờ OT phải lớn hơn 0.')
+    onSubmit({ otDate, startTime, endTime, totalHours: hours, compensationType, reason })
+  }
   return (
     <Card>
       <CardHeader title="Đăng ký làm thêm (OT)" icon={<Clock3 className="h-4 w-4" />} />
@@ -182,8 +190,8 @@ function OvertimeForm({ catalog, submitting, onSubmit }: { catalog: any; submitt
           {catalog.compensationTypes.map((t: any) => <option key={t.value} value={t.value}>{t.label}</option>)}
         </Select>
         <Textarea label="Lý do" rows={3} value={reason} onChange={(e) => setReason(e.target.value)} />
-        <Button onClick={() => onSubmit({ otDate, startTime, endTime, totalHours: hours, compensationType, reason })}
-          loading={submitting} disabled={!otDate || overCap} className="w-full" icon={<Send className="h-4 w-4" />}>Gửi đơn OT ({hours}h)</Button>
+        <Button onClick={submitOt}
+          loading={submitting} disabled={!otDate || overCap || timeInvalid} className="w-full" icon={<Send className="h-4 w-4" />}>Gửi đơn OT ({hours}h)</Button>
       </CardBody>
     </Card>
   )
@@ -250,6 +258,16 @@ function AttendanceUpdateForm({ catalog, submitting, onSubmit }: { catalog: any;
   const [newCheckOutTime, setNewCheckOutTime] = useState('')
   const [newWorkHours, setNewWorkHours] = useState<number | ''>('')
   const [reason, setReason] = useState('')
+  const needsTimes = updateType !== 3
+  const timesInvalid = needsTimes && (!newCheckInTime || !newCheckOutTime || newCheckInTime >= newCheckOutTime)
+  function submitUpdate() {
+    if (!requestDate) return toast.error('Vui lòng chọn ngày cần cập nhật công.')
+    if (needsTimes) {
+      if (!newCheckInTime || !newCheckOutTime) return toast.error('Vui lòng nhập giờ vào và giờ ra mới.')
+      if (newCheckInTime >= newCheckOutTime) return toast.error('Giờ ra mới phải sau giờ vào.')
+    }
+    onSubmit({ requestDate, updateType, newCheckInTime: newCheckInTime || null, newCheckOutTime: newCheckOutTime || null, newWorkHours: newWorkHours === '' ? null : newWorkHours, reason })
+  }
   return (
     <Card>
       <CardHeader title="Yêu cầu cập nhật công" icon={<FileEdit className="h-4 w-4" />} />
@@ -258,22 +276,16 @@ function AttendanceUpdateForm({ catalog, submitting, onSubmit }: { catalog: any;
         <Select label="Loại cập nhật" value={updateType} onChange={(e) => setUpdateType(Number(e.target.value) as AttendanceUpdateType)}>
           {catalog.attendanceUpdateTypes.map((t: any) => <option key={t.value} value={t.value}>{t.label}</option>)}
         </Select>
-        {updateType !== 3 && (
+        {needsTimes && (
           <div className="grid grid-cols-2 gap-4">
-            {updateType !== 2 && <Input label="Giờ vào mới" type="time" value={newCheckInTime} onChange={(e) => setNewCheckInTime(e.target.value)} />}
-            {updateType !== 2 && <Input label="Giờ ra mới" type="time" value={newCheckOutTime} onChange={(e) => setNewCheckOutTime(e.target.value)} />}
-            {updateType === 2 && (
-              <>
-                <Input label="Giờ vào mới" type="time" value={newCheckInTime} onChange={(e) => setNewCheckInTime(e.target.value)} />
-                <Input label="Giờ ra mới" type="time" value={newCheckOutTime} onChange={(e) => setNewCheckOutTime(e.target.value)} />
-              </>
-            )}
+            <Input label="Giờ vào mới" type="time" value={newCheckInTime} onChange={(e) => setNewCheckInTime(e.target.value)} />
+            <Input label="Giờ ra mới" type="time" value={newCheckOutTime} onChange={(e) => setNewCheckOutTime(e.target.value)} />
           </div>
         )}
         {updateType === 1 && <Input label="Giờ làm (tùy chọn)" type="number" value={newWorkHours} onChange={(e) => setNewWorkHours(e.target.value === '' ? '' : Number(e.target.value))} />}
         <Textarea label="Lý do" rows={3} value={reason} onChange={(e) => setReason(e.target.value)} />
-        <Button onClick={() => onSubmit({ requestDate, updateType, newCheckInTime: newCheckInTime || null, newCheckOutTime: newCheckOutTime || null, newWorkHours: newWorkHours === '' ? null : newWorkHours, reason })}
-          loading={submitting} className="w-full" icon={<Send className="h-4 w-4" />}>Gửi đơn cập nhật</Button>
+        <Button onClick={submitUpdate}
+          loading={submitting} disabled={!requestDate || timesInvalid} className="w-full" icon={<Send className="h-4 w-4" />}>Gửi đơn cập nhật</Button>
       </CardBody>
     </Card>
   )
