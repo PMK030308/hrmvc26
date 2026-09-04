@@ -20,10 +20,17 @@ import { getRegulation } from '../repo.js'
 import { REQUEST_PERMISSIONS, canManageRequestAttachment, canViewRequest } from '../authz/requestAuthorization.js'
 import { assertAuthorizedAction, loadRequestActor, loadRequestAuthorizationContext, requireViewableRequest } from '../authz/requestAuthorizationContext.js'
 import { isEligibleShiftSwapPartner, listEligibleShiftSwapPartners } from '../authz/shiftSwapPartnerAuthorization.js'
+import { generateApprovedRequestPdf } from '../services/requestPdfService.js'
+import { createRateLimitMiddleware } from '../middleware/rateLimit.js'
 
 const VALID_TYPES = ['leaves', 'late-earlies', 'overtimes', 'business-trips', 'shift-swaps', 'attendance-updates']
 
 export const requestsRouter = Router()
+const requestPdfRateLimit = createRateLimitMiddleware({
+  windowMs: Number(process.env.REQUEST_PDF_RATE_LIMIT_WINDOW_MS) || 60_000,
+  maxAttempts: Number(process.env.REQUEST_PDF_RATE_LIMIT_MAX) || 20,
+  key: (request) => `${request.ip}:${(request as AuthedRequest).user?.id ?? 'anonymous'}`,
+})
 
 function attachmentRouteError(error: unknown, publicMessage: string): unknown {
   if (typeof error === 'object' && error !== null && 'status' in error) return error
@@ -86,6 +93,24 @@ requestsRouter.get('/partner-shift/:partnerId/:date', requireAuth, (req: AuthedR
     if (!isEligibleShiftSwapPartner(actor, req.params.partnerId)) throw httpError(404, 'Không tìm thấy ca của đối tác.')
     const sched = getSchedule(req.params.partnerId, req.params.date)
     res.json({ shift: sched ? getShift(sched.shiftId) : null })
+  } catch (error) { next(error) }
+})
+
+requestsRouter.get('/:type/:id/export-pdf', requireAuth, requestPdfRateLimit, async (req: AuthedRequest, res, next) => {
+  try {
+    if (!VALID_TYPES.includes(req.params.type)) throw httpError(404, 'Không tìm thấy loại đơn.')
+    const actor = loadRequestActor(req.user!.id)
+    requireViewableRequest(actor, req.params.type, req.params.id)
+    const pdf = await generateApprovedRequestPdf(req.params.type, req.params.id)
+    res.setHeader('Content-Type', 'application/pdf')
+    res.setHeader('Content-Disposition', `attachment; filename="${pdf.fileName}"`)
+    res.setHeader('Content-Length', String(pdf.buffer.length))
+    res.setHeader('Cache-Control', 'private, no-store')
+    res.setHeader('X-Content-Type-Options', 'nosniff')
+    res.setHeader('X-Request-Verification-Code', pdf.verificationCode)
+    pushAudit(req.user!.id, req.user!.email, 1, 'RequestPdfExport', req.params.id,
+      `Xuất PDF đơn đã duyệt; verification=${pdf.verificationCode}`)
+    res.send(pdf.buffer)
   } catch (error) { next(error) }
 })
 

@@ -37,6 +37,7 @@ getPrimaryAttachmentStorage()
 
 app.set('trust proxy', securityConfig.trustProxy)
 app.use(cors({
+  exposedHeaders: ['Content-Disposition', 'X-Request-Verification-Code'],
   origin(origin, callback) {
     if (isCorsOriginAllowed(securityConfig, origin)) return callback(null, true)
     callback(new HttpError(403, 'Origin không được phép.'))

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { CheckCircle2, XCircle, Ban, MessageSquare, UserCheck } from 'lucide-react'
+import { CheckCircle2, XCircle, Ban, MessageSquare, UserCheck, FileDown } from 'lucide-react'
 import { toast } from 'sonner'
 import { requestsApi, approvalsApi } from '@/api/requests'
 
@@ -28,6 +28,20 @@ export default function RequestDetailPage() {
   const [actionModal, setActionModal] = useState<null | { kind: 'approve' | 'reject' | 'cancel' | 'partner' }>(null)
   const [comment, setComment] = useState('')
   const [partnerAccept, setPartnerAccept] = useState(true)
+  const [isExportingPdf, setIsExportingPdf] = useState(false)
+
+  const exportPdf = async () => {
+    if (!req || req.status !== 3) return
+    setIsExportingPdf(true)
+    try {
+      await requestsApi.downloadApprovedPdf(req.type, req.id, req.employeeCode)
+      toast.success('Đã xuất PDF đơn được duyệt')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Không thể xuất PDF')
+    } finally {
+      setIsExportingPdf(false)
+    }
+  }
 
   const approve = useMutation({
     mutationFn: () => approvalsApi.approve(type as RequestType, id, comment, req!.requestVersion),
@@ -90,6 +104,10 @@ export default function RequestDetailPage() {
           <Card>
             <CardHeader title="Thao tác" icon={<MessageSquare className="h-4 w-4" />} />
             <CardBody className="space-y-2">
+              {req.status === 3 && (
+                <Button className="w-full" variant="primary" icon={<FileDown className="h-4 w-4" />}
+                  loading={isExportingPdf} onClick={exportPdf}>Xuất PDF đã duyệt</Button>
+              )}
               {(cap.canApprove || cap.canReject) && (req.status === 2 || req.status === 8) && (
                 <>
                   {cap.canApprove && <Button className="w-full" variant="success" icon={<CheckCircle2 className="h-4 w-4" />} onClick={() => setActionModal({ kind: 'approve' })}>Duyệt đơn</Button>}
@@ -103,7 +121,7 @@ export default function RequestDetailPage() {
                 </>
               )}
               {cap.canCancel && <Button className="w-full" variant="secondary" icon={<Ban className="h-4 w-4" />} onClick={() => setActionModal({ kind: 'cancel' })}>Hủy đơn</Button>}
-              {!cap.canApprove && !cap.canReject && !cap.canRespond && !cap.canCancel && <EmptyState icon={<MessageSquare className="h-6 w-6" />} title="Không có thao tác" description="Đơn ở trạng thái không cần xử lý." />}
+              {req.status !== 3 && !cap.canApprove && !cap.canReject && !cap.canRespond && !cap.canCancel && <EmptyState icon={<MessageSquare className="h-6 w-6" />} title="Không có thao tác" description="Chỉ có thể xuất PDF chính thức sau khi đơn được duyệt hoàn tất." />}
             </CardBody>
           </Card>
 

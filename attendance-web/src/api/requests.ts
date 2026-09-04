@@ -66,6 +66,25 @@ export const requestsApi = {
     }
   },
 
+  async downloadApprovedPdf(type: RequestType, id: string, fallbackCode: string): Promise<void> {
+    const response = await http.get<Blob>(`/requests/${type}/${id}/export-pdf`, { responseType: 'blob' })
+    const disposition = String(response.headers['content-disposition'] ?? '')
+    const headerName = /filename="([^"]+)"/i.exec(disposition)?.[1]
+    const fileName = headerName || `don-${fallbackCode}-${id}.pdf`
+    const url = URL.createObjectURL(response.data)
+    try {
+      const link = document.createElement('a')
+      link.href = url
+      link.download = fileName
+      link.rel = 'noopener'
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+    } finally {
+      window.setTimeout(() => URL.revokeObjectURL(url), 0)
+    }
+  },
+
   myShiftOnDate(date: string): Promise<{ shift: Shift | null; schedule: ShiftSchedule | null }> {
     return api.get(`/requests/my-shift/${date}`)
   },
