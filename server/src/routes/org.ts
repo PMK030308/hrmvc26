@@ -1,4 +1,4 @@
-import { Router } from 'express'
+import express, { Router } from 'express'
 import { z } from 'zod'
 import { db } from '../db.js'
 import { requireAuth, requirePermission, type AuthedRequest } from '../middleware/auth.js'
@@ -10,6 +10,14 @@ import { isoNow } from '../lib/date.js'
 import { truncateAndSeed } from '../seed.js'
 import { validateAvatarData } from '../services/mediaValidation.js'
 import { loadAuthorizationActor } from '../authz/authorizationActor.js'
+import { createRateLimitMiddleware } from '../middleware/rateLimit.js'
+import {
+  createEmployeeExport,
+  createEmployeeTemplate,
+  EMPLOYEE_IMPORT_MAX_BYTES,
+  EMPLOYEE_XLSX_MIME,
+  importEmployeesFromExcel,
+} from '../services/employeeExcelService.js'
 import {
   canCreateEmployeeInDepartment,
   canCreateEmployees,
@@ -21,6 +29,12 @@ import {
 } from '../authz/organizationAuthorization.js'
 
 export const orgRouter = Router()
+
+const employeeExcelRateLimit = createRateLimitMiddleware({
+  windowMs: 60_000,
+  maxAttempts: 10,
+  key: (request) => (request as AuthedRequest).user?.id ?? request.ip,
+})
 
 const dateOnly = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
 const employeeFields = {
@@ -123,6 +137,55 @@ orgRouter.get('/employees', requireAuth, (req: AuthedRequest, res, next) => {
     res.json(list.map((employee) => projectEmployee(employee, actor)))
   } catch (error) { next(error) }
 })
+
+orgRouter.get('/employees/import-template', requireAuth, async (req: AuthedRequest, res, next) => {
+  try {
+    const actor = loadAuthorizationActor(req.user!.id)
+    if (!canCreateEmployees(actor)) throw httpError(403, 'Bạn không có quyền nhập nhân viên.')
+    const file = await createEmployeeTemplate(actor)
+    res.setHeader('Content-Type', EMPLOYEE_XLSX_MIME)
+    res.setHeader('Content-Disposition', 'attachment; filename="mau-nhap-nhan-vien.xlsx"')
+    res.setHeader('Cache-Control', 'private, no-store')
+    res.setHeader('X-Content-Type-Options', 'nosniff')
+    res.setHeader('Cross-Origin-Resource-Policy', 'same-origin')
+    res.send(file)
+  } catch (error) { next(error) }
+})
+
+orgRouter.get('/employees/export-excel', requireAuth, async (req: AuthedRequest, res, next) => {
+  try {
+    const actor = loadAuthorizationActor(req.user!.id)
+    if (!canListEmployees(actor)) throw httpError(403, 'Bạn không có quyền xuất danh sách nhân viên.')
+    const file = await createEmployeeExport(actor)
+    const date = new Date().toISOString().slice(0, 10)
+    res.setHeader('Content-Type', EMPLOYEE_XLSX_MIME)
+    res.setHeader('Content-Disposition', `attachment; filename="danh-sach-nhan-vien-${date}.xlsx"`)
+    res.setHeader('Cache-Control', 'private, no-store')
+    res.setHeader('X-Content-Type-Options', 'nosniff')
+    res.setHeader('Cross-Origin-Resource-Policy', 'same-origin')
+    res.send(file)
+  } catch (error) { next(error) }
+})
+
+orgRouter.post(
+  '/employees/import-excel',
+  requireAuth,
+  employeeExcelRateLimit,
+  express.raw({ type: EMPLOYEE_XLSX_MIME, limit: EMPLOYEE_IMPORT_MAX_BYTES }),
+  async (req: AuthedRequest, res, next) => {
+    try {
+      const actor = loadAuthorizationActor(req.user!.id)
+      if (!canCreateEmployees(actor)) throw httpError(403, 'Bạn không có quyền nhập nhân viên.')
+      if (!Buffer.isBuffer(req.body)) throw httpError(415, 'Chỉ chấp nhận file Excel định dạng .xlsx.')
+      if (req.body.length < 4 || req.body[0] !== 0x50 || req.body[1] !== 0x4b) {
+        throw httpError(415, 'File tải lên không phải file .xlsx hợp lệ.')
+      }
+      const result = await importEmployeesFromExcel(req.body, actor)
+      if (result.errors.length > 0) return res.status(422).json(result)
+      return res.status(201).json(result)
+    } catch (error) { next(error) }
+  },
+)
 
 orgRouter.get('/employees/:id', requireAuth, (req: AuthedRequest, res, next) => {
   try {

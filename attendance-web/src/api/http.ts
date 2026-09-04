@@ -13,12 +13,14 @@ export class ApiError extends Error {
   status: number
   code?: string
   fieldErrors?: Record<string, string>
-  constructor(status: number, message: string, code?: string, fieldErrors?: Record<string, string>) {
+  details?: unknown
+  constructor(status: number, message: string, code?: string, fieldErrors?: Record<string, string>, details?: unknown) {
     super(message)
     this.name = 'ApiError'
     this.status = status
     this.code = code
     this.fieldErrors = fieldErrors
+    this.details = details
   }
 }
 
@@ -78,7 +80,7 @@ http.interceptors.response.use(
         localStorage.removeItem(TOKEN_KEY)
         localStorage.removeItem(REFRESH_TOKEN_KEY)
       }
-      return Promise.reject(new ApiError(status, message, data?.code, data?.fieldErrors))
+      return Promise.reject(new ApiError(status, message, data?.code, data?.fieldErrors, data))
     }
     // Lỗi mạng / timeout
     return Promise.reject(new ApiError(0, error.message ?? 'Không kết nối được đến máy chủ.'))

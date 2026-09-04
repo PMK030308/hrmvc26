@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Users, Plus, Search, Pencil, Trash2, Mail, Phone } from 'lucide-react'
+import { Users, Plus, Search, Pencil, Trash2, Mail, Phone, Download, Upload, FileSpreadsheet, CircleCheck, CircleAlert } from 'lucide-react'
 import { toast } from 'sonner'
-import { orgApi } from '@/api/org'
+import { orgApi, type EmployeeImportResult } from '@/api/org'
 import { fmtCurrency } from '@/lib/format'
 import { fmtDate } from '@/lib/date'
 import { EMPLOYEE_STATUS_LABEL, GENDER_LABEL, WORK_NATURE_LABEL, CONTRACT_LABEL } from '@/constants/enums'
@@ -24,6 +24,8 @@ export default function AdminEmployees() {
   const [dept, setDept] = useState('')
   const [editing, setEditing] = useState<Partial<Employee> | null>(null)
   const [del, setDel] = useState<EmployeeProjection | null>(null)
+  const [importResult, setImportResult] = useState<EmployeeImportResult | null>(null)
+  const fileInput = useRef<HTMLInputElement>(null)
 
   const { data: emps, isLoading } = useQuery({ queryKey: ['org', 'employees', { dept, q }], queryFn: () => orgApi.employees({ departmentId: dept || undefined, search: q || undefined }), enabled: capabilities.canViewEmployees })
   const { data: departments } = useQuery({ queryKey: ['org', 'departments'], queryFn: () => orgApi.departments(), enabled: capabilities.canViewCatalog })
@@ -40,17 +42,45 @@ export default function AdminEmployees() {
     onSuccess: () => { toast.success('Đã chuyển nhân viên sang trạng thái nghỉ việc'); setDel(null); qc.invalidateQueries({ queryKey: ['org'] }) },
     onError: (e: Error) => toast.error(e.message),
   })
+  const downloadTemplate = useMutation({
+    mutationFn: () => orgApi.downloadEmployeeTemplate(),
+    onError: (e: Error) => toast.error(e.message),
+  })
+  const exportExcel = useMutation({
+    mutationFn: () => orgApi.exportEmployees(),
+    onError: (e: Error) => toast.error(e.message),
+  })
+  const importExcel = useMutation({
+    mutationFn: (file: File) => orgApi.importEmployees(file),
+    onSuccess: (result) => {
+      setImportResult(result)
+      if (result.importedCount > 0) {
+        toast.success(`Đã nhập ${result.importedCount} nhân viên`)
+        qc.invalidateQueries({ queryKey: ['org'] })
+      }
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+
+  const selectExcel = (file?: File) => {
+    if (file) importExcel.mutate(file)
+    if (fileInput.current) fileInput.current.value = ''
+  }
 
   const deptName = (id: string) => departments?.find((d) => d.id === id)?.name ?? '—'
   const posName = (id: string) => positions?.find((p) => p.id === id)?.name ?? '—'
 
   return (
     <div>
-      <PageHeader title="Nhân viên" subtitle="Quản lý hồ sơ nhân sự" actions={
-        capabilities.canManageEmployees
-          ? <Button icon={<Plus className="h-4 w-4" />} onClick={() => setEditing({ ...empty })}>Thêm nhân viên</Button>
-          : undefined
-      } />
+      <PageHeader title="Nhân viên" subtitle="Quản lý hồ sơ nhân sự" actions={<div className="flex flex-wrap justify-end gap-2">
+        {capabilities.canViewEmployees && <Button variant="secondary" loading={exportExcel.isPending} icon={<Download className="h-4 w-4" />} onClick={() => exportExcel.mutate()}>Xuất Excel</Button>}
+        {capabilities.canManageEmployees && <>
+          <Button variant="secondary" loading={downloadTemplate.isPending} icon={<FileSpreadsheet className="h-4 w-4" />} onClick={() => downloadTemplate.mutate()}>Tải file mẫu</Button>
+          <Button variant="secondary" loading={importExcel.isPending} icon={<Upload className="h-4 w-4" />} onClick={() => fileInput.current?.click()}>Nhập Excel</Button>
+          <input ref={fileInput} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" className="hidden" onChange={(event) => selectExcel(event.target.files?.[0])} />
+          <Button icon={<Plus className="h-4 w-4" />} onClick={() => setEditing({ ...empty })}>Thêm nhân viên</Button>
+        </>}
+      </div>} />
 
       <Card>
         <CardHeader title={`Danh sách (${emps?.length ?? 0})`} icon={<Users className="h-4 w-4" />} action={
@@ -122,6 +152,29 @@ export default function AdminEmployees() {
       <ConfirmDialog open={!!del} onClose={() => setDel(null)} danger
         title="Cho nhân viên nghỉ việc" message={`Chuyển "${del?.fullName}" sang trạng thái nghỉ việc? Hồ sơ và lịch sử vẫn được giữ lại.`}
         confirmText="Xác nhận nghỉ việc" onConfirm={() => del && remove.mutate(del.id)} />
+
+      <Modal open={!!importResult} onClose={() => setImportResult(null)} size="lg" title="Kết quả nhập Excel"
+        footer={<Button onClick={() => setImportResult(null)}>Đóng</Button>}>
+        {importResult && <div className="space-y-4">
+          <div className={`flex items-start gap-3 rounded-xl border p-4 ${importResult.errors.length === 0 ? 'border-success-200 bg-success-50' : 'border-danger-200 bg-danger-50'}`}>
+            {importResult.errors.length === 0 ? <CircleCheck className="mt-0.5 h-5 w-5 shrink-0 text-success-600" /> : <CircleAlert className="mt-0.5 h-5 w-5 shrink-0 text-danger-600" />}
+            <div>
+              <p className="font-semibold text-slate-800">{importResult.errors.length === 0 ? `Đã nhập thành công ${importResult.importedCount} nhân viên` : `Có ${importResult.errors.length} lỗi cần sửa`}</p>
+              <p className="mt-1 text-sm text-slate-600">Đã kiểm tra {importResult.totalRows} dòng. {importResult.errors.length > 0 && 'Chưa có nhân viên nào được thêm; hãy sửa file rồi tải lại.'}</p>
+            </div>
+          </div>
+          {importResult.errors.length > 0 && <div className="max-h-80 overflow-auto rounded-xl border border-slate-200">
+            <table className="w-full text-left text-sm">
+              <thead className="sticky top-0 bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="px-4 py-3">Dòng</th><th className="px-4 py-3">Cột</th><th className="px-4 py-3">Lỗi</th></tr></thead>
+              <tbody className="divide-y divide-slate-100">{importResult.errors.map((error, index) => <tr key={`${error.row}-${error.field}-${index}`}>
+                <td className="whitespace-nowrap px-4 py-3 font-mono font-semibold text-danger-600">{error.row || '—'}</td>
+                <td className="whitespace-nowrap px-4 py-3 font-medium text-slate-700">{error.field}</td>
+                <td className="px-4 py-3 text-slate-600">{error.message}</td>
+              </tr>)}</tbody>
+            </table>
+          </div>}
+        </div>}
+      </Modal>
     </div>
   )
 }

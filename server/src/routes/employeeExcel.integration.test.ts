@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test, { after, before, beforeEach } from 'node:test'
-import type { NextFunction, Request, Response } from 'express'
+import type { NextFunction, Request, Response as ExpressResponse } from 'express'
 import ExcelJS from 'exceljs'
 import type { HttpError } from '../types.js'
 
@@ -38,7 +38,7 @@ before(async () => {
   const app = express()
   app.use(express.json())
   app.use('/api/org', orgRouter)
-  app.use((error: HttpError, _req: Request, res: Response, _next: NextFunction) => {
+  app.use((error: HttpError, _req: Request, res: ExpressResponse, _next: NextFunction) => {
     res.status(error.status ?? 500).json({ message: error.message, code: error.code, fieldErrors: error.fieldErrors })
   })
   server = app.listen(0)
@@ -105,11 +105,11 @@ async function workbookBuffer(rows: Array<Record<string, unknown>>): Promise<Buf
   return Buffer.from(await workbook.xlsx.writeBuffer())
 }
 
-async function upload(actorId: string, rows: Array<Record<string, unknown>>): Promise<Response> {
+async function upload(actorId: string, rows: Array<Record<string, unknown>>): Promise<globalThis.Response> {
   return fetch(`${baseUrl}/org/employees/import-excel`, {
     method: 'POST',
     headers: { ...auth(actorId), 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
-    body: await workbookBuffer(rows),
+    body: new Uint8Array(await workbookBuffer(rows)),
   })
 }
 
@@ -127,7 +127,7 @@ test('HR downloads a readable, lightly styled template with catalogs', async () 
   assert.match(response.headers.get('content-type') ?? '', /spreadsheetml/)
   assert.match(response.headers.get('content-disposition') ?? '', /attachment/)
   const workbook = new ExcelJS.Workbook()
-  await workbook.xlsx.load(Buffer.from(await response.arrayBuffer()))
+  await workbook.xlsx.load(Buffer.from(await response.arrayBuffer()) as any)
   const input = workbook.getWorksheet('Nhân viên')
   assert.ok(input)
   assert.equal(input.getCell('A1').value, 'Mã nhân viên')
@@ -181,7 +181,7 @@ test('export respects employee scope and hides compensation without its permissi
   const response = await fetch(`${baseUrl}/org/employees/export-excel`, { headers: auth('hr') })
   assert.equal(response.status, 200)
   const workbook = new ExcelJS.Workbook()
-  await workbook.xlsx.load(Buffer.from(await response.arrayBuffer()))
+  await workbook.xlsx.load(Buffer.from(await response.arrayBuffer()) as any)
   const sheet = workbook.getWorksheet('Nhân viên')!
   const headers = (sheet.getRow(1).values as unknown[]).map(String)
   assert.equal(headers.includes('Lương'), false)
