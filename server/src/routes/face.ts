@@ -126,7 +126,7 @@ faceRouter.post('/verify', requireAuth, requirePermission(FACE_SELF_PERMISSION),
       if (dist < minDist) minDist = dist
     }
     if (minDist >= MATCH_THRESHOLD)
-      throw httpError(401, `Khuôn mặt không khớp (khoảng cách ${minDist.toFixed(3)} >= ${MATCH_THRESHOLD}).`)
+      throw httpError(400, `Khuôn mặt không khớp (khoảng cách ${minDist.toFixed(3)} >= ${MATCH_THRESHOLD}).`)
 
     // Liveness (nếu regulation bật).
     const reg = getRegulation()

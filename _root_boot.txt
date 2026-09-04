@@ -1,0 +1,32 @@
+
+> hrm-attendance@1.0.0 dev
+> concurrently -n BE,FE -c blue,green "npm:dev:be" "npm:dev:fe"
+
+[BE] 
+[BE] > hrm-attendance@1.0.0 dev:be
+[BE] > npm run dev --prefix server
+[BE] 
+[FE] 
+[FE] > hrm-attendance@1.0.0 dev:fe
+[FE] > npm run dev --prefix attendance-web
+[FE] 
+[BE] 
+[BE] > hrm-attendance-server@1.0.0 dev
+[BE] > tsx watch src/index.ts
+[BE] 
+[FE] 
+[FE] > attendance-web@0.0.0 dev
+[FE] > vite
+[FE] 
+[FE] [33m(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+[FE]   - `__dirname` (vite.config.ts:10:25). Use `import.meta.dirname` instead
+[FE] Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.[39m
+[FE] 
+[FE]   [32m[1mVITE[22m v8.2.1[39m  [2mready in [0m[1m995[22m[2m[0m ms[22m
+[FE] 
+[FE]   [32m➜[39m  [1mLocal[22m:   [36mhttp://localhost:[1m5173[22m/[39m
+[FE] [2m  [32m➜[39m  [1mNetwork[22m[2m: use [22m[1m--host[22m[2m to expose[22m
+[BE] 
+[BE]   ✅ HRM backend chạy tại http://localhost:4000/api
+[BE]      Đăng nhập demo: admin@technova.vn / 123456
+[BE] 
