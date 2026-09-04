@@ -14,6 +14,7 @@ import type { FaceAttempt, LivenessPayload, PunchResponse } from '@/types'
 import { Modal, Button, Spinner, Badge } from '@/components/ui'
 
 const AUTO_FRAMES = 3 // số khung liên tiếp phát hiện mặt → tự chấm (quét nhanh)
+const AUTO_COOLDOWN_MS = 3000 // khoảng chờ giữa 2 lần tự chấm (tránh spam toast khi mặt không khớp)
 
 export function FacePunchModal({
   open, onClose, nextAction, onDone,
@@ -29,16 +30,21 @@ export function FacePunchModal({
   const streakRef = useRef(0)
   const verifyingRef = useRef(false)
   const doneRef = useRef(false)
+  const lastVerifyAtRef = useRef(0)
+  const serverUnreachableRef = useRef(false)
   const [modelsReady, setModelsReady] = useState(false)
   const [modelError, setModelError] = useState<string | null>(null)
   const [cameraOn, setCameraOn] = useState(false)
   const [busy, setBusy] = useState(false)
   const [phase, setPhase] = useState<'idle' | 'scanning' | 'verifying' | 'done'>('idle')
   const [result, setResult] = useState<PunchResponse | null>(null)
+  const [serverDown, setServerDown] = useState(false)
   const qc = useQueryClient()
 
   const status = useQuery({ queryKey: ['face', 'status'], queryFn: () => faceApi.status(), enabled: open })
   const registered = status.data?.registered ?? false
+  // Nếu query /status lỗi (thường vì backend chưa chạy) → báo rõ 1 lần thay vì để vòng quét spam lỗi mạng.
+  useEffect(() => { if (status.isError) setServerDown(true) }, [status.isError])
 
   const ensureModels = useCallback(async () => {
     setModelError(null)
@@ -51,6 +57,7 @@ export function FacePunchModal({
     if (!open) return
     let active = true
     doneRef.current = false; verifyingRef.current = false; streakRef.current = 0
+    serverUnreachableRef.current = false; setServerDown(false)
     setPhase('idle'); setResult(null)
     ;(async () => {
       const ok = await ensureModels()
@@ -64,16 +71,16 @@ export function FacePunchModal({
     })()
     return () => { active = false; streamRef.current?.getTracks().forEach((t) => t.stop()); streamRef.current = null; setCameraOn(false) }
   }, [open, ensureModels])
-
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['attendance', 'today'] })
     qc.invalidateQueries({ queryKey: ['employee', 'dashboard'] })
     qc.invalidateQueries({ queryKey: ['attendance', 'detail'] })
   }
-
   const runVerify = useCallback(async () => {
     const v = videoRef.current
     if (!v || verifyingRef.current || doneRef.current) return
+    lastVerifyAtRef.current = Date.now()
+    serverUnreachableRef.current = false; setServerDown(false)
     verifyingRef.current = true
     setBusy(true); setPhase('verifying')
     try {
@@ -97,7 +104,16 @@ export function FacePunchModal({
         invalidate(); onDone?.(res)
       } else { toast.warning(res.message); streakRef.current = 0 }
     } catch (e: any) {
-      toast.error(e?.message ?? 'Chấm công thất bại.'); streakRef.current = 0
+      const st = e?.status
+      if (st === 0 || st === 502 || st === 503 || st === 504) {
+        // Mất kết nối tới backend (chưa chạy / đang khởi động / rớt mạng). Dừng auto-verify,
+        // báo 1 lần rõ ràng; người dùng bấm "Chấm ngay" để thử lại sau khi BE sẵn sàng.
+        serverUnreachableRef.current = true; setServerDown(true)
+        toast.error('Không kết nối được máy chủ chấm công (backend chưa chạy hoặc đang khởi động). Hãy chạy "npm run dev" ở thư mục gốc, đợi [BE] hiện "✅ HRM backend chạy tại http://localhost:4000/api", rồi bấm "Chấm ngay" để thử lại.')
+      } else {
+        toast.error(e?.message ?? 'Chấm công thất bại.')
+      }
+      streakRef.current = 0
     } finally {
       verifyingRef.current = false; setBusy(false)
       setPhase((p) => (p === 'done' ? 'done' : 'scanning'))
@@ -121,7 +137,7 @@ export function FacePunchModal({
           ctx.lineWidth = 3; ctx.strokeRect(x, y, width, height)
           if (phase === 'scanning' && !verifyingRef.current && !doneRef.current) {
             streakRef.current++
-            if (streakRef.current >= AUTO_FRAMES) runVerify()
+            if (streakRef.current >= AUTO_FRAMES && Date.now() - lastVerifyAtRef.current > AUTO_COOLDOWN_MS && registered && !serverUnreachableRef.current) runVerify()
           }
         } else { streakRef.current = 0 }
       }
@@ -129,8 +145,7 @@ export function FacePunchModal({
     }
     raf = requestAnimationFrame(loop)
     return () => { stop = true; cancelAnimationFrame(raf) }
-  }, [cameraOn, modelsReady, phase, runVerify])
-
+  }, [cameraOn, modelsReady, phase, runVerify, registered])
   const actionLabel = nextAction === 'check_in' ? 'Chấm VÀO' : nextAction === 'check_out' ? 'Chấm RA' : 'Hoàn tất'
   return (
     <Modal open={open} onClose={onClose} title={<span className="flex items-center gap-2"><ScanFace className="h-5 w-5 text-brand-600" /> Chấm công bằng khuôn mặt</span>} size="md">
@@ -164,6 +179,7 @@ export function FacePunchModal({
             )}
           </div>
           {modelError && <p className="rounded-lg bg-danger-50 px-3 py-2 text-xs text-danger-700">{modelError}</p>}
+          {serverDown && <p className="rounded-lg bg-danger-50 px-3 py-2 text-xs text-danger-700">Không kết nối được máy chủ chấm công. Hãy chạy <code className="font-mono">npm run dev</code> ở thư mục gốc, đợi <code className="font-mono">[BE] ✅ HRM backend chạy tại http://localhost:4000/api</code>, rồi bấm &quot;Chấm ngay&quot; để thử lại.</p>}
           {result ? (
             <div className="rounded-xl bg-success-50 p-4 text-sm">
               <div className="flex items-center gap-2 text-success-700"><CheckCircle2 className="h-5 w-5" /><span className="font-semibold">{result.message}</span></div>
