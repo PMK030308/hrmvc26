@@ -1,13 +1,18 @@
 // ============================================================================
-// Gemini REST client (function calling) — không dùng SDK, chỉ dùng fetch (Node 22).
-// Tài liệu: generativelanguage.googleapis.com/v1beta/models/<model>:generateContent
-// Key đọc từ process.env.GEMINI_API_KEY (nạp qua lib/env.ts).
+// LLM client (function calling) — tương thích OpenAI (/chat/completions).
+// Mặc định trỏ tới endpoint OpenAI-compatible của Google Gemini, nhưng có thể
+// đổi sang relay/proxy bất kỳ qua GEMINI_BASE_URL (vd: https://cheapkeyai.shop/v1).
+// Biến môi trường:
+//   GEMINI_API_KEY  — bearer token (bắt buộc)
+//   GEMINI_BASE_URL — base URL của endpoint OpenAI-compatible (tuỳ chọn)
+//   GEMINI_MODEL    — tên model (tuỳ chọn)
 // ============================================================================
-const MODEL = process.env.GEMINI_MODEL || 'gemini-3.6-flash'
-// Đọc key lười (lúc gọi) — tránh chạy tại module-load trước khi loadEnvFile() nạp .env.
-const geminiKey = () => process.env.GEMINI_API_KEY || ''
-const endpoint = () =>
-  `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${geminiKey()}`
+
+// Endpoint mặc định: OpenAI-compat của Google Gemini (dùng được với Google API key).
+const DEFAULT_BASE = 'https://generativelanguage.googleapis.com/v1beta/openai'
+const base = () => (process.env.GEMINI_BASE_URL || DEFAULT_BASE).replace(/\/+$/, '')
+const model = () => process.env.GEMINI_MODEL || 'gemini-3.6-flash'
+const key = () => process.env.GEMINI_API_KEY || ''
 
 export interface GeminiPart {
   text?: string
@@ -32,32 +37,51 @@ export interface GenerateResult {
 }
 
 export function hasGeminiKey(): boolean {
-  return !!geminiKey()
+  return !!key()
 }
 
-/** Một lượt gọi generateContent. Trả về content của model + text + các functionCall. */
-export async function generateContent(
-  contents: GeminiContent[],
-  systemInstruction: string,
-  tools: FunctionDeclaration[],
-): Promise<GenerateResult> {
-  if (!geminiKey()) throw new Error('Thiếu GEMINI_API_KEY trên server.')
-  const body: Record<string, any> = {
-    contents,
-    systemInstruction: { parts: [{ text: systemInstruction }] },
-    generationConfig: { temperature: 0.2 },
+/** Chuyển FunctionDeclaration[] → định dạng tools của OpenAI. */
+function toOpenAITools(tools: FunctionDeclaration[]): any[] {
+  return tools.map((t) => ({
+    type: 'function',
+    function: {
+      name: t.name,
+      description: t.description,
+      parameters: t.parameters ?? { type: 'object', properties: {} },
+    },
+  }))
+}
+
+/** Chuyển GeminiContent[] (chỉ chứa text — từ history client) → OpenAI messages. */
+function toOpenAIMessages(history: GeminiContent[], systemInstruction: string): any[] {
+  const msgs: any[] = [{ role: 'system', content: systemInstruction }]
+  for (const c of history) {
+    const text = (c.parts ?? []).map((p) => p.text).filter((t): t is string => !!t).join('')
+    msgs.push({ role: c.role === 'model' ? 'assistant' : 'user', content: text })
   }
-  if (tools.length) body.tools = [{ functionDeclarations: tools }]
+  return msgs
+}
+
+interface ChatCompletionResult {
+  content: string | null
+  toolCalls: { id: string; name: string; args: Record<string, any> }[]
+}
+
+/** Một lượt gọi /chat/completions. */
+async function chatCompletion(messages: any[], tools: any[]): Promise<ChatCompletionResult> {
+  if (!key()) throw new Error('Thiếu GEMINI_API_KEY trên server.')
+  const body: Record<string, any> = { model: model(), messages, temperature: 0.2 }
+  if (tools.length) body.tools = tools
 
   let res: Response
   try {
-    res = await fetch(endpoint(), {
+    res = await fetch(`${base()}/chat/completions`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key()}` },
       body: JSON.stringify(body),
     })
   } catch (e: any) {
-    throw new Error(`Không kết nối được Gemini: ${e?.message ?? e}`)
+    throw new Error(`Không kết nối được dịch vụ chatbot: ${e?.message ?? e}`)
   }
 
   if (!res.ok) {
@@ -67,22 +91,39 @@ export async function generateContent(
     throw new Error(`Nhà cung cấp chatbot trả lỗi ${res.status}. ${detail.slice(0, 500)}`.trim())
   }
   const data = await res.json()
-  const cand = data?.candidates?.[0]
-  const content: GeminiContent | null = cand?.content ?? null
-  const parts: GeminiPart[] = content?.parts ?? []
-  const text = parts.map((p) => p.text).filter((t): t is string => !!t).join('') || null
-  const functionCalls = parts
-    .filter((p) => p.functionCall)
-    .map((p) => ({ name: p.functionCall!.name, args: p.functionCall!.args ?? {} }))
-  return { content, text, functionCalls }
+  const msg = data?.choices?.[0]?.message ?? {}
+  const toolCalls = (msg.tool_calls ?? []).map((tc: any) => {
+    let args: Record<string, any> = {}
+    try { args = JSON.parse(tc?.function?.arguments || '{}') } catch { args = {} }
+    return { id: tc?.id ?? `call_${Math.random().toString(36).slice(2)}`, name: tc?.function?.name, args }
+  })
+  return { content: msg.content ?? null, toolCalls }
+}
+
+/** Một lượt generate (giữ signature cũ; dùng /chat/completions). */
+export async function generateContent(
+  contents: GeminiContent[],
+  systemInstruction: string,
+  tools: FunctionDeclaration[],
+): Promise<GenerateResult> {
+  const messages = toOpenAIMessages(contents, systemInstruction)
+  const { content, toolCalls } = await chatCompletion(messages, toOpenAITools(tools))
+  const parts: GeminiPart[] = []
+  if (content) parts.push({ text: content })
+  for (const tc of toolCalls) parts.push({ functionCall: { name: tc.name, args: tc.args } })
+  const geminiContent: GeminiContent | null = parts.length ? { role: 'model', parts } : null
+  return {
+    content: geminiContent,
+    text: content,
+    functionCalls: toolCalls.map((tc) => ({ name: tc.name, args: tc.args })),
+  }
 }
 
 /**
- * Chạy hội thoại với vòng lặp function-calling.
- * - Gửi `userMessage` (kèm history) đến Gemini cùng bộ tools.
- * - Khi model gọi tool → gọi `onToolCall(name, args)` để thực thi, bồi functionResponse,
- *   rồi lặp lại (tối đa maxRounds).
- * - Khi model trả text thuần → kết thúc, trả về text cuối.
+ * Chạy hội thoại với vòng lặp function-calling (OpenAI tool_calls).
+ * - Gửi userMessage (kèm history) đến LLM cùng bộ tools.
+ * - Khi model gọi tool → thực thi, bồi kết quả dạng message 'tool', rồi lặp (tối đa maxRounds).
+ * - Khi model trả text thuần → kết thúc.
  */
 export async function runChat(opts: {
   history: GeminiContent[]
@@ -94,29 +135,32 @@ export async function runChat(opts: {
 }): Promise<string> {
   const { history, userMessage, systemInstruction, tools, onToolCall } = opts
   const maxRounds = opts.maxRounds ?? 6
-  const contents: GeminiContent[] = [
-    ...history,
-    { role: 'user', parts: [{ text: userMessage }] },
-  ]
+  const messages = toOpenAIMessages(history, systemInstruction)
+  messages.push({ role: 'user', content: userMessage })
+  const openaiTools = toOpenAITools(tools)
 
   for (let i = 0; i < maxRounds; i++) {
-    const { content, text, functionCalls } = await generateContent(contents, systemInstruction, tools)
-    if (content) contents.push(content)
-
-    if (!functionCalls.length) return text ?? ''
-
-    // Thực thi từng functionCall, bọc kết quả vào functionResponse (role 'user').
-    const respParts: GeminiPart[] = []
-    for (const fc of functionCalls) {
+    const { content, toolCalls } = await chatCompletion(messages, openaiTools)
+    if (!toolCalls.length) return content ?? ''
+    // Lưu assistant message kèm tool_calls (đúng định dạng OpenAI để tiếp tục vòng).
+    messages.push({
+      role: 'assistant',
+      content: content ?? null,
+      tool_calls: toolCalls.map((tc) => ({
+        id: tc.id, type: 'function',
+        function: { name: tc.name, arguments: JSON.stringify(tc.args) },
+      })),
+    })
+    // Thực thi từng tool, bồi kết quả dạng message 'tool'.
+    for (const tc of toolCalls) {
       let result: Record<string, any>
       try {
-        result = await onToolCall(fc.name, fc.args)
+        result = await onToolCall(tc.name, tc.args)
       } catch (e: any) {
         result = { error: e?.message ?? 'Lỗi thực thi tool.' }
       }
-      respParts.push({ functionResponse: { name: fc.name, response: result } })
+      messages.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(result) })
     }
-    contents.push({ role: 'user', parts: respParts })
   }
   return 'Đã quá số lượt xử lý. Vui lòng gửi lại câu hỏi ngắn gọn hơn.'
 }
