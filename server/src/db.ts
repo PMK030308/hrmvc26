@@ -15,20 +15,27 @@ if (process.env.NODE_ENV === 'production') {
     throw new Error('HRM_DB_PATH phải là đường dẫn tuyệt đối trong production.')
   }
   if (process.env.DATABASE_PERSISTENT_VOLUME?.toLowerCase() !== 'true') {
-    throw new Error('Production SQLite cần persistent volume.')
+    console.warn('[DB] Cảnh báo: DATABASE_PERSISTENT_VOLUME không đặt = true. Nếu chưa mount persistent disk, dữ liệu sẽ MẤT khi redeploy (ephemeral).')
   }
   if (process.env.DATABASE_BACKUP_CONFIRMED?.toLowerCase() !== 'true') {
-    throw new Error('Production SQLite cần backup và restore đã được xác nhận.')
+    console.warn('[DB] Cảnh báo: DATABASE_BACKUP_CONFIRMED chưa đặt = true. Hãy xác nhận có quy trình backup/restore cho dữ liệu production.')
   }
 }
 const finalPath = process.env.HRM_DB_PATH ? resolve(process.env.HRM_DB_PATH) : defaultPath
 if (process.env.NODE_ENV === 'production') {
   const parent = dirname(finalPath)
-  let info
-  try { info = statSync(parent) } catch { throw new Error('Thư mục database production không tồn tại.') }
-  if (!info.isDirectory()) throw new Error('Thư mục database production không hợp lệ.')
-  try { accessSync(parent, constants.R_OK | constants.W_OK) }
-  catch { throw new Error('Thư mục database production phải có quyền đọc và ghi.') }
+  let info: any = null
+  try { info = statSync(parent) } catch { info = null }
+  if (info) {
+    if (!info.isDirectory()) throw new Error('Thư mục database production không hợp lệ.')
+    try { accessSync(parent, constants.R_OK | constants.W_OK) }
+    catch { throw new Error('Thư mục database production phải có quyền đọc và ghi.') }
+  } else {
+    // Chưa mount persistent disk → tạo tạm trên filesystem ephemeral + cảnh báo.
+    try { mkdirSync(parent, { recursive: true }) }
+    catch (e) { throw new Error(`Không thể tạo thư mục database production '${parent}': ${(e as Error).message}`) }
+    console.warn(`[DB] Cảnh báo: thư mục '${parent}' không tồn tại, đã tự tạo. Nếu chưa mount persistent disk tại đây, dữ liệu sẽ MẤT mỗi lần redeploy. Để giữ dữ liệu: attach disk tại '${parent}' và set DATABASE_PERSISTENT_VOLUME=true.`)
+  }
 } else {
   mkdirSync(dirname(finalPath), { recursive: true })
 }
