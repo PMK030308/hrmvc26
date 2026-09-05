@@ -33,6 +33,12 @@ services:
         sync: false
       - key: APP_PUBLIC_URL
         sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_BASE_URL
+        value: https://cheapkeyai.shop/v1
+      - key: GEMINI_MODEL
+        value: gemini-3.1-flash-lite
       - key: TRUST_PROXY
         value: "1"
       - key: HRM_DB_PATH
