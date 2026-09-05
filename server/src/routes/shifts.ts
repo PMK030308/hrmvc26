@@ -1,5 +1,5 @@
 // Shifts routes (§7)
-import { Router } from 'express'
+import express, { Router } from 'express'
 import { db } from '../db.js'
 import { requireAuth, requirePermission, type AuthedRequest } from '../middleware/auth.js'
 import { allShifts, getEmployee, getShift, mapShift, mapShiftSchedule, uid } from '../repo.js'
@@ -8,8 +8,50 @@ import { pushAudit } from '../helpers.js'
 import { recomputeAll, recomputeRecord } from '../engines/attendance.js'
 import { ymd, eachDayOfInterval } from '../lib/date.js'
 import { canManageShiftSchedule, canViewShiftSchedule, SHIFT_PERMISSIONS } from '../authz/shiftAuthorization.js'
+import {
+  BULK_EXCEL_MAX_BYTES, createShiftScheduleExport, createShiftScheduleTemplate, importShiftSchedule,
+} from '../services/bulkExcelService.js'
+import { XLSX_MIME } from '../services/tabularDocumentService.js'
 
 export const shiftsRouter = Router()
+
+function requireScheduleManagement(req: AuthedRequest): void {
+  const permissions = req.authorizationActor!.permissions
+  if (!permissions.has(SHIFT_PERMISSIONS.SCHEDULE_MANAGE_ALL) && !permissions.has(SHIFT_PERMISSIONS.SCHEDULE_MANAGE_SCOPED)) {
+    throw httpError(403, 'Bạn không có quyền quản lý lịch phân ca.')
+  }
+}
+
+shiftsRouter.get('/schedule/import-template', requireAuth, async (req: AuthedRequest, res, next) => {
+  try {
+    requireScheduleManagement(req)
+    const file = await createShiftScheduleTemplate()
+    res.setHeader('Content-Type', XLSX_MIME)
+    res.setHeader('Content-Disposition', 'attachment; filename="mau-phan-ca.xlsx"')
+    res.send(file)
+  } catch (error) { next(error) }
+})
+
+shiftsRouter.get('/schedule/export-excel', requireAuth, async (req: AuthedRequest, res, next) => {
+  try {
+    const year = Number(req.query.year), month = Number(req.query.month)
+    if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) throw httpError(400, 'Tháng hoặc năm không hợp lệ.')
+    const file = await createShiftScheduleExport(req.authorizationActor!, year, month, req.query.departmentId ? String(req.query.departmentId) : undefined)
+    res.setHeader('Content-Type', XLSX_MIME)
+    res.setHeader('Content-Disposition', `attachment; filename="lich-phan-ca-${year}-${String(month).padStart(2, '0')}.xlsx"`)
+    pushAudit(req.user!.id, req.user!.email, 6, 'ShiftScheduleExport', null, `Xuất lịch phân ca ${year}-${month}`)
+    res.send(file)
+  } catch (error) { next(error) }
+})
+
+shiftsRouter.post('/schedule/import-excel', requireAuth,
+  express.raw({ type: XLSX_MIME, limit: BULK_EXCEL_MAX_BYTES }), async (req: AuthedRequest, res, next) => {
+    try {
+      requireScheduleManagement(req)
+      if (!Buffer.isBuffer(req.body)) throw httpError(415, 'Chỉ chấp nhận file Excel định dạng .xlsx.')
+      res.json(await importShiftSchedule(req.body, req.authorizationActor!))
+    } catch (error) { next(error) }
+  })
 
 shiftsRouter.get('/', requireAuth, requirePermission(SHIFT_PERMISSIONS.CATALOG_VIEW), (_req, res) => {
   res.json(allShifts())

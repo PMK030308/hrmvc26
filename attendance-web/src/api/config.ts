@@ -1,7 +1,7 @@
 // ============================================================================
 // API — Cấu hình & quy định (§11) + Role/permission (§11.3) + Profile (§9) — HTTP.
 // ============================================================================
-import { api } from './http'
+import { api, downloadFile } from './http'
 import type { AttendanceRegulation, LeaveType, User, Employee, EmployeeProfile, RoleCode, PermissionMatrixSnapshot } from '@/types'
 import { isLegacyAuthorizationUser, normalizeAuthorizationUser, normalizePermissionMatrixResponse } from '@/lib/authorizationApiCompatibility'
 
@@ -40,6 +40,7 @@ export const rolesApi = {
   async createUser(payload: { email: string; employeeId: string; roles: RoleCode[] }): Promise<User> {
     return normalizeAuthorizationUser(await api.post('/config/roles/users', payload))
   },
+  exportExcel(): Promise<void> { return downloadFile('/config/roles/export-excel', 'tai-khoan-phan-quyen.xlsx') },
 }
 
 export const profileApi = {

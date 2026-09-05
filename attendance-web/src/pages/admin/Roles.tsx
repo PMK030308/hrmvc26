@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, ChevronDown, Pencil, Plus, Search, ShieldCheck, Users } from 'lucide-react'
+import { Check, ChevronDown, Download, Pencil, Plus, Search, ShieldCheck, Users } from 'lucide-react'
 import { toast } from 'sonner'
 import { rolesApi } from '@/api/config'
 import { orgApi } from '@/api/org'
@@ -87,6 +87,9 @@ export default function AdminRoles() {
     },
     onError: (error: Error) => toast.error(error.message),
   })
+  const exportExcel = useMutation({
+    mutationFn: () => rolesApi.exportExcel(), onSuccess: () => toast.success('Đã xuất tài khoản và phân quyền Excel'), onError: (error: Error) => toast.error(error.message),
+  })
 
   const toggleModule = (module: string) => {
     setExpandedModules((current) => {
@@ -99,7 +102,8 @@ export default function AdminRoles() {
 
   return <div>
     <PageHeader title="Quản lý vai trò & quyền" subtitle="Phân quyền hệ thống và quản lý tài khoản tập trung"
-      actions={activeTab === 'accounts' ? <Button icon={<Plus className="h-4 w-4" />} onClick={() => setCreating(true)}>Tạo tài khoản</Button> : undefined} />
+      actions={<div className="flex gap-2"><Button variant="secondary" icon={<Download className="h-4 w-4" />} loading={exportExcel.isPending} onClick={() => exportExcel.mutate()}>Xuất kiểm tra</Button>
+        {activeTab === 'accounts' && <Button icon={<Plus className="h-4 w-4" />} onClick={() => setCreating(true)}>Tạo tài khoản</Button>}</div>} />
 
     <div className="mb-5 inline-flex w-full rounded-xl bg-slate-100 p-1 sm:w-auto" aria-label="Nội dung quản lý quyền">
       <TabButton active={activeTab === 'matrix'} onClick={() => setActiveTab('matrix')} icon={<ShieldCheck className="h-4 w-4" />} label="Ma trận quyền" count={matrixDraft.length} />

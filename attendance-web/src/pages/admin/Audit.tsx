@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { ScrollText, ChevronLeft, ChevronRight } from 'lucide-react'
+import { useMutation, useQuery } from '@tanstack/react-query'
+import { ScrollText, ChevronLeft, ChevronRight, Download } from 'lucide-react'
+import { toast } from 'sonner'
 import { auditApi } from '@/api/audit'
 import { AUDIT_ACTION_LABEL } from '@/constants/enums'
 import { fmtDate } from '@/lib/date'
@@ -17,10 +18,15 @@ export default function AdminAudit() {
   const items = data?.items ?? []
   const total = data?.total ?? 0
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  const exportExcel = useMutation({
+    mutationFn: () => auditApi.exportExcel(), onSuccess: () => toast.success('Đã xuất audit log Excel'), onError: (error: Error) => toast.error(error.message),
+  })
 
   return (
     <div>
-      <PageHeader title="Audit log" subtitle="Nhật ký thao tác hệ thống theo quyền được cấp" />
+      <PageHeader title="Audit log" subtitle="Nhật ký thao tác hệ thống theo quyền được cấp" actions={
+        <Button variant="secondary" icon={<Download className="h-4 w-4" />} loading={exportExcel.isPending} disabled={total === 0} onClick={() => exportExcel.mutate()}>Xuất Excel</Button>
+      } />
       <Card>
         <CardHeader title={`${total} bản ghi · trang ${page}/${pages}`} icon={<ScrollText className="h-4 w-4" />} action={
           <div className="flex items-center gap-2">

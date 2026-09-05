@@ -1,7 +1,7 @@
 // ============================================================================
 // API — Dashboard (Admin/HR) + Director (§10 / §14.7) — HTTP.
 // ============================================================================
-import { api } from './http'
+import { api, downloadFile } from './http'
 import type { AdminDashboard, AnyRequest, PayrollAggregate, SalaryFund, WorkHoursAvg, SalaryMonthly } from '@/types'
 import { normalizeDirectorPayroll, normalizeDirectorReport } from '@/lib/financialApiCompatibility'
 
@@ -39,4 +39,8 @@ export const dashboardApi = {
 
   /** So sánh quỹ lương các kỳ nửa tháng — giải thích tháng nhiều/tháng ít do OT. */
   salaryMonthly(): Promise<SalaryMonthly> { return api.get('/dashboard/salary-monthly') },
+
+  exportReport(from: string, to: string, format: 'excel' | 'pdf'): Promise<void> {
+    return downloadFile(`/dashboard/director-reports/export-${format}`, `bao-cao-${from}_${to}.${format === 'excel' ? 'xlsx' : 'pdf'}`, { from, to })
+  },
 }

@@ -1,10 +1,11 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { Wallet, ChevronRight, FileText } from 'lucide-react'
+import { useMutation, useQuery } from '@tanstack/react-query'
+import { Wallet, ChevronRight, Download, FileText } from 'lucide-react'
+import { toast } from 'sonner'
 import { payrollApi } from '@/api/timesheet'
 import { fmtCurrency } from '@/lib/format'
 
-import { Card, CardHeader, CardBody, PageHeader, Spinner, EmptyState, Table, Tr, Td, Badge } from '@/components/ui'
+import { Button, Card, CardHeader, CardBody, PageHeader, Spinner, EmptyState, Table, Tr, Td, Badge } from '@/components/ui'
 import { PAYROLL_COMPONENT_LABEL } from '@/constants/enums'
 
 
@@ -16,6 +17,9 @@ function periodLabel(p: string): string {
 export default function SalaryPage() {
   const { data, isLoading } = useQuery({ queryKey: ['payroll', 'mine'], queryFn: () => payrollApi.mine() })
   const [selected, setSelected] = useState<string | null>(null)
+  const exportPdf = useMutation({
+    mutationFn: (id: string) => payrollApi.exportPayslip(id), onSuccess: () => toast.success('Đã tải phiếu lương PDF'), onError: (error: Error) => toast.error(error.message),
+  })
   if (isLoading) return <Card className="p-5"><Spinner /></Card>
   const list = data?.list ?? []
   const slip = selected ? list.find((p) => p.period === selected) : data?.latest ?? null
@@ -43,7 +47,9 @@ export default function SalaryPage() {
 
           {slip && (
             <Card className="lg:col-span-2">
-              <CardHeader title={periodLabel(slip.period)} subtitle={slip.employeeName} icon={<Wallet className="h-4 w-4" />} />
+              <CardHeader title={periodLabel(slip.period)} subtitle={slip.employeeName} icon={<Wallet className="h-4 w-4" />} action={
+                <Button size="sm" variant="secondary" icon={<Download className="h-4 w-4" />} loading={exportPdf.isPending} onClick={() => exportPdf.mutate(slip.id)}>Tải PDF</Button>
+              } />
               <CardBody>
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                   <Stat label="Lương cơ bản" value={fmtCurrency(slip.baseSalary)} />
