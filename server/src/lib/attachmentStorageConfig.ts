@@ -18,15 +18,19 @@ export function resolveAttachmentStorageConfig(
   if (provider !== 'local') throw new Error(`Attachment storage provider không được hỗ trợ: ${provider}.`)
 
   const production = env.NODE_ENV === 'production'
+  const lenient = env.HRM_ALLOW_INSECURE_PRODUCTION?.trim().toLowerCase() === 'true'
   const configuredRoot = env.ATTACHMENT_STORAGE_ROOT?.trim()
-  if (production && !configuredRoot) throw new Error('ATTACHMENT_STORAGE_ROOT phải được cấu hình trong production.')
   if (configuredRoot && !isAbsolute(configuredRoot)) throw new Error('ATTACHMENT_STORAGE_ROOT phải là đường dẫn tuyệt đối.')
-  if (production && !enabled(env.ATTACHMENT_STORAGE_PERSISTENT_VOLUME)) {
+  if (production && !lenient && !configuredRoot) throw new Error('ATTACHMENT_STORAGE_ROOT phải được cấu hình trong production.')
+  if (production && lenient && !configuredRoot) console.warn('[SECURITY] Cảnh báo: ATTACHMENT_STORAGE_ROOT chưa cấu hình — dùng default ephemeral. File đính kèm sẽ MẤT khi redeploy.')
+  if (production && !lenient && !enabled(env.ATTACHMENT_STORAGE_PERSISTENT_VOLUME)) {
     throw new Error('Production local attachment storage cần persistent volume đáng tin cậy.')
   }
-  if (production && !enabled(env.ATTACHMENT_STORAGE_BACKUP_CONFIRMED)) {
+  if (production && lenient && !enabled(env.ATTACHMENT_STORAGE_PERSISTENT_VOLUME)) console.warn('[SECURITY] Cảnh báo: ATTACHMENT_STORAGE_PERSISTENT_VOLUME chưa true (ephemeral).')
+  if (production && !lenient && !enabled(env.ATTACHMENT_STORAGE_BACKUP_CONFIRMED)) {
     throw new Error('Production local attachment storage cần xác nhận backup đáng tin cậy.')
   }
+  if (production && lenient && !enabled(env.ATTACHMENT_STORAGE_BACKUP_CONFIRMED)) console.warn('[SECURITY] Cảnh báo: ATTACHMENT_STORAGE_BACKUP_CONFIRMED chưa true.')
 
   return {
     provider: 'local',
@@ -38,8 +42,10 @@ export function assertAttachmentStorageRootReady(
   config: AttachmentStorageConfig,
   env: NodeJS.ProcessEnv | Record<string, string | undefined>,
 ): void {
-  if (env.NODE_ENV !== 'production') {
+  const lenient = env.HRM_ALLOW_INSECURE_PRODUCTION?.trim().toLowerCase() === 'true'
+  if (env.NODE_ENV !== 'production' || lenient) {
     mkdirSync(config.localRoot, { recursive: true, mode: 0o700 })
+    if (env.NODE_ENV === 'production' && lenient) console.warn(`[SECURITY] Cảnh báo: thư mục attachment '${config.localRoot}' được tự tạo (ephemeral).`)
     return
   }
   let info
