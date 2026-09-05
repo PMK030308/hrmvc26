@@ -14,6 +14,15 @@ export function assertProductionReadiness(
   env: NodeJS.ProcessEnv | Record<string, string | undefined>,
 ): void {
   if (env.NODE_ENV !== 'production') return
+  const lenient = env.HRM_ALLOW_INSECURE_PRODUCTION?.trim().toLowerCase() === 'true'
+  if (lenient) {
+    console.warn('[SECURITY] HRM_ALLOW_INSECURE_PRODUCTION=true — đang bỏ qua các guard production (chỉ dùng cho demo, KHÔNG an toàn cho production thật).')
+    if (!absolutePath(env.HRM_DB_PATH?.trim())) console.warn('[SECURITY] HRM_DB_PATH không tuyệt đối.')
+    if (!enabled(env.DATABASE_PERSISTENT_VOLUME)) console.warn('[SECURITY] DATABASE_PERSISTENT_VOLUME chưa true (dữ liệu ephemeral).')
+    if (!enabled(env.DATABASE_BACKUP_CONFIRMED)) console.warn('[SECURITY] DATABASE_BACKUP_CONFIRMED chưa true.')
+    if (!enabled(env.RETENTION_SCHEDULER_ENABLED)) console.warn('[SECURITY] RETENTION_SCHEDULER_ENABLED chưa true.')
+    return
+  }
   resolveSecurityConfig(env)
   resolvePasswordResetDeliveryConfig(env)
   if (!absolutePath(env.HRM_DB_PATH?.trim())) throw new Error('HRM_DB_PATH must be an absolute production path.')

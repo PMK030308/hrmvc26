@@ -91,9 +91,10 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
 initSchema()
 runMigrations(db)
 ensureDefaultRolePermissions()
-// Seed tự động nếu DB trống (lần khởi động đầu)
-if ((db.prepare('SELECT COUNT(*) c FROM employees').get() as any).c === 0 && process.env.NODE_ENV === 'production') {
-  throw new Error('Database production đang trống; từ chối tự động seed tài khoản demo.')
+// Seed tự động nếu DB trống (lần khởi động đầu). Trong production, chỉ seed khi
+// HRM_ALLOW_INSECURE_PRODUCTION=true (demo) — tránh seed tài khoản demo vào DB production thật.
+if ((db.prepare('SELECT COUNT(*) c FROM employees').get() as any).c === 0 && process.env.NODE_ENV === 'production' && process.env.HRM_ALLOW_INSECURE_PRODUCTION?.trim().toLowerCase() !== 'true') {
+  throw new Error('Database production đang trống; từ chối tự động seed tài khoản demo. Set HRM_ALLOW_INSECURE_PRODUCTION=true nếu đây là deploy demo.')
 }
 if ((db.prepare('SELECT COUNT(*) c FROM employees').get() as any).c === 0) {
   console.log('  ℹ️  DB trống — tự động seed dữ liệu mẫu...')

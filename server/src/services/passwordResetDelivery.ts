@@ -25,12 +25,30 @@ export function resolvePasswordResetDeliveryConfig(
   env: NodeJS.ProcessEnv | Record<string, string | undefined>,
 ): PasswordResetDeliveryConfig {
   const production = env.NODE_ENV === 'production'
+  const lenient = env.HRM_ALLOW_INSECURE_PRODUCTION?.trim().toLowerCase() === 'true'
   const provider = env.PASSWORD_RESET_DELIVERY_PROVIDER?.trim().toLowerCase() || 'none'
   if (provider === 'none') {
-    if (production) throw new Error('PASSWORD_RESET_DELIVERY_PROVIDER must be configured in production.')
+    if (production && !lenient) throw new Error('PASSWORD_RESET_DELIVERY_PROVIDER must be configured in production.')
+    if (production && lenient) console.warn('[SECURITY] Cảnh báo: PASSWORD_RESET_DELIVERY_PROVIDER=none — quên mật khẩu sẽ không gửi được email.')
     return { provider: 'none' }
   }
-  if (provider !== 'webhook') throw new Error(`Unsupported password reset delivery provider: ${provider}`)
+  if (provider !== 'webhook') {
+    if (lenient) { console.warn(`[SECURITY] PASSWORD_RESET_DELIVERY_PROVIDER không hỗ trợ '${provider}' — dùng none.`); return { provider: 'none' } }
+    throw new Error(`Unsupported password reset delivery provider: ${provider}`)
+  }
+  if (lenient) {
+    try {
+      const webhookUrl = exactHttpsUrl(env.PASSWORD_RESET_WEBHOOK_URL, 'PASSWORD_RESET_WEBHOOK_URL')
+      const publicResetUrl = exactHttpsUrl(env.PASSWORD_RESET_PUBLIC_URL, 'PASSWORD_RESET_PUBLIC_URL')
+      const bearerToken = env.PASSWORD_RESET_WEBHOOK_BEARER_TOKEN?.trim()
+      if (!bearerToken || bearerToken.length < 32) throw new Error('PASSWORD_RESET_WEBHOOK_BEARER_TOKEN must be at least 32 characters.')
+      if (production && env.PASSWORD_RESET_EXPOSE_TOKEN?.trim().toLowerCase() === 'true') throw new Error('PASSWORD_RESET_EXPOSE_TOKEN must never be enabled in production.')
+      return { provider: 'webhook', webhookUrl, bearerToken, publicResetUrl }
+    } catch (e) {
+      console.warn(`[SECURITY] Cấu hình password reset webhook không hợp lệ: ${(e as Error).message} — dùng none.`)
+      return { provider: 'none' }
+    }
+  }
   const webhookUrl = exactHttpsUrl(env.PASSWORD_RESET_WEBHOOK_URL, 'PASSWORD_RESET_WEBHOOK_URL')
   const publicResetUrl = exactHttpsUrl(env.PASSWORD_RESET_PUBLIC_URL, 'PASSWORD_RESET_PUBLIC_URL')
   const bearerToken = env.PASSWORD_RESET_WEBHOOK_BEARER_TOKEN?.trim()

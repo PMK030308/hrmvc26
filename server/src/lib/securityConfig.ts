@@ -20,13 +20,20 @@ export function resolveJwtSecret(env: NodeJS.ProcessEnv | Record<string, string 
 
 export function resolveSecurityConfig(env: NodeJS.ProcessEnv | Record<string, string | undefined>): SecurityConfig {
   const production = env.NODE_ENV === 'production'
+  const lenient = env.HRM_ALLOW_INSECURE_PRODUCTION?.trim().toLowerCase() === 'true'
   const jwtSecret = resolveJwtSecret(env)
-  if (production && (jwtSecret === DEVELOPMENT_JWT_SECRET || jwtSecret.length < 32)) {
+  if (production && !lenient && (jwtSecret === DEVELOPMENT_JWT_SECRET || jwtSecret.length < 32)) {
     throw new Error('JWT_SECRET phải được cấu hình bằng secret production dài ít nhất 32 ký tự.')
   }
+  if (production && lenient && (jwtSecret === DEVELOPMENT_JWT_SECRET || jwtSecret.length < 32)) {
+    console.warn('[SECURITY] Cảnh báo: JWT_SECRET chưa cấu hình hợp lệ — dùng dev secret. KHÔNG an toàn cho production thật.')
+  }
   const corsOrigins = (env.CORS_ORIGINS ?? '').split(',').map((origin) => origin.trim()).filter(Boolean)
-  if (production && corsOrigins.length === 0) throw new Error('CORS_ORIGINS phải được cấu hình trong production.')
-  if (production) {
+  if (production && !lenient && corsOrigins.length === 0) throw new Error('CORS_ORIGINS phải được cấu hình trong production.')
+  if (production && lenient && corsOrigins.length === 0) {
+    console.warn('[SECURITY] Cảnh báo: CORS_ORIGINS trống — cho phép mọi origin. KHÔNG an toàn cho production thật.')
+  }
+  if (production && !lenient) {
     for (const origin of corsOrigins) {
       let parsed: URL
       try { parsed = new URL(origin) } catch { throw new Error(`CORS_ORIGINS chứa origin không hợp lệ: ${origin}`) }
