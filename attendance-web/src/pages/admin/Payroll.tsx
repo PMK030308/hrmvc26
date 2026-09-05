@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { BadgeDollarSign, Download, FileText } from 'lucide-react'
 import { toast } from 'sonner'
 import { payrollApi } from '@/api/timesheet'
@@ -17,21 +17,17 @@ export default function AdminPayroll() {
   const totalNet = payslips.reduce((s, p) => s + p.net, 0)
   const totalGross = payslips.reduce((s, p) => s + p.gross, 0)
 
-  function exportCsv() {
-    if (payslips.length === 0) { toast.error('Không có dữ liệu để xuất'); return }
-    const rows = [['Mã NV', 'Họ tên', 'Lương cơ bản', 'Công hưởng', 'Làm thêm', 'Phụ cấp', 'Khấu trừ', 'Thực lĩnh']]
-      .concat(payslips.map((p) => [p.employeeName, p.employeeName, String(p.baseSalary), String(p.paidWork), String(p.overtime), String(p.allowance), String(p.deductions), String(p.net)]))
-    const csv = '﻿' + rows.map((r) => r.map((c) => `"${c}"`).join(',')).join('\n')
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a'); a.href = url; a.download = `payroll-${active}.csv`; a.click(); URL.revokeObjectURL(url)
-    toast.success('Đã xuất CSV')
-  }
+  const exportSheet = useMutation({
+    mutationFn: () => payrollApi.exportSheet(active), onSuccess: () => toast.success('Đã xuất bảng lương Excel'), onError: (error: Error) => toast.error(error.message),
+  })
+  const exportPayslip = useMutation({
+    mutationFn: (id: string) => payrollApi.exportPayslip(id), onSuccess: () => toast.success('Đã xuất phiếu lương PDF'), onError: (error: Error) => toast.error(error.message),
+  })
 
   return (
     <div>
       <PageHeader title="Bảng lương" subtitle="Phiếu lương theo kỳ thanh toán" actions={
-        <Button variant="secondary" icon={<Download className="h-4 w-4" />} onClick={exportCsv} disabled={!payslips.length}>Xuất CSV</Button>
+        <Button variant="secondary" icon={<Download className="h-4 w-4" />} loading={exportSheet.isPending} onClick={() => exportSheet.mutate()} disabled={!payslips.length}>Xuất Excel</Button>
       } />
 
       <div className="grid gap-5 lg:grid-cols-4">
@@ -60,7 +56,7 @@ export default function AdminPayroll() {
               </div>
               <Card>
                 <CardHeader title={periodLabel(active)} subtitle={`${payslips.length} phiếu lương`} icon={<BadgeDollarSign className="h-4 w-4" />} />
-                <Table headers={['Nhân viên', 'Cơ bản', 'Công hưởng', 'OT', 'Phụ cấp', 'Khấu trừ', 'Thực lĩnh']}>
+                <Table headers={['Nhân viên', 'Cơ bản', 'Công hưởng', 'OT', 'Phụ cấp', 'Khấu trừ', 'Thực lĩnh', 'Phiếu']}>
                   {payslips.map((p: Payslip) => (
                     <Tr key={p.id}>
                       <Td><p className="font-medium text-slate-800">{p.employeeName}</p><p className="text-xs text-slate-400">#{p.employeeId.slice(-6)}</p></Td>
@@ -68,6 +64,7 @@ export default function AdminPayroll() {
                       <Td>{fmtCurrency(p.overtime)}</Td><Td>{fmtCurrency(p.allowance)}</Td>
                       <Td className="text-danger-600">-{fmtCurrency(p.deductions)}</Td>
                       <Td className="font-bold text-brand-700">{fmtCurrency(p.net)}</Td>
+                      <Td><Button size="sm" variant="secondary" icon={<FileText className="h-4 w-4" />} loading={exportPayslip.isPending} onClick={() => exportPayslip.mutate(p.id)}>PDF</Button></Td>
                     </Tr>
                   ))}
                 </Table>

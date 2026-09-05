@@ -1,7 +1,7 @@
 // ============================================================================
 // API — Đơn từ + duyệt (§14.5 / §14.6) — HTTP.
 // ============================================================================
-import { api, http } from './http'
+import { api, downloadFile, http } from './http'
 import type {
   RequestType, AnyRequest, RequestCatalog, RequestAttachment, ShiftSchedule, Shift,
 } from '@/types'
@@ -19,6 +19,8 @@ export const requestsApi = {
   },
 
   list(type: RequestType): Promise<AnyRequest[]> { return api.get(`/requests/${type}`) },
+
+  exportList(type: RequestType): Promise<void> { return downloadFile(`/requests/${type}/export-excel`, `danh-sach-don-${type}.xlsx`) },
 
   detail(type: RequestType, id: string): Promise<AnyRequest> { return api.get(`/requests/${type}/${id}`) },
 

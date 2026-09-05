@@ -1,13 +1,17 @@
-import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { Table2 } from 'lucide-react'
+import { useRef, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Download, FileSpreadsheet, Table2, Upload } from 'lucide-react'
+import { toast } from 'sonner'
 import { timesheetApi } from '@/api/timesheet'
+import { attendanceApi } from '@/api/attendance'
 import { orgApi } from '@/api/org'
 import { ATTENDANCE_STATUS_LABEL } from '@/constants/enums'
-import { PageHeader, Card, CardHeader, Spinner, EmptyState, Badge } from '@/components/ui'
+import { PageHeader, Card, CardHeader, Spinner, EmptyState, Badge, Button } from '@/components/ui'
 import { PeriodPicker } from '@/components/admin/widgets'
 import type { AttendanceRecord } from '@/types'
 import { cn } from '@/lib/cn'
+import { usePermissions } from '@/hooks/usePermissions'
+import { ImportResultModal } from '@/components/admin/ImportResultModal'
 
 const cellTone: Record<number, string> = {
   1: 'bg-success-100 text-success-700', 2: 'bg-warning-100 text-warning-700', 3: 'bg-warning-100 text-warning-700',
@@ -15,6 +19,11 @@ const cellTone: Record<number, string> = {
 }
 
 export default function AdminTimesheet() {
+  const { hasPermission } = usePermissions()
+  const canImport = hasPermission('attendance.proxy_punch')
+  const queryClient = useQueryClient()
+  const importInput = useRef<HTMLInputElement>(null)
+  const [importResult, setImportResult] = useState<{ totalRows: number; importedCount: number; errors: Array<{ row: number; field: string; message: string }> } | null>(null)
   const now = new Date()
   const [year, setYear] = useState(now.getFullYear())
   const [month, setMonth] = useState(now.getMonth() + 1)
@@ -29,10 +38,30 @@ export default function AdminTimesheet() {
 
   const days = data?.days ?? []
   const employees = data?.employees ?? []
+  const exportExcel = useMutation({
+    mutationFn: () => timesheetApi.exportDetailed({ year, month, half, departmentId: dept || undefined }),
+    onSuccess: () => toast.success('Đã xuất bảng công Excel'), onError: (error: Error) => toast.error(error.message),
+  })
+  const downloadTemplate = useMutation({
+    mutationFn: () => attendanceApi.downloadImportTemplate(), onError: (error: Error) => toast.error(error.message),
+  })
+  const importExcel = useMutation({
+    mutationFn: (file: File) => attendanceApi.importExcel(file),
+    onSuccess: (result) => {
+      setImportResult(result)
+      if (result.importedCount) { toast.success(`Đã nhập ${result.importedCount} lượt chấm công`); queryClient.invalidateQueries({ queryKey: ['timesheet'] }) }
+    },
+    onError: (error: Error) => toast.error(error.message),
+  })
 
   return (
     <div>
-      <PageHeader title="Bảng công chi tiết" subtitle="Chấm công nhân viên theo ngày (nửa tháng)" />
+      <PageHeader title="Bảng công chi tiết" subtitle="Chấm công nhân viên theo ngày (nửa tháng)" actions={<div className="flex flex-wrap gap-2">
+        <Button variant="secondary" icon={<Download className="h-4 w-4" />} loading={exportExcel.isPending} onClick={() => exportExcel.mutate()}>Xuất Excel</Button>
+        {canImport && <><Button variant="secondary" icon={<FileSpreadsheet className="h-4 w-4" />} loading={downloadTemplate.isPending} onClick={() => downloadTemplate.mutate()}>File mẫu chấm công</Button>
+          <Button variant="secondary" icon={<Upload className="h-4 w-4" />} loading={importExcel.isPending} onClick={() => importInput.current?.click()}>Nhập chấm công</Button>
+          <input ref={importInput} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) importExcel.mutate(file); event.target.value = '' }} /></>}
+      </div>} />
       <Card className="mb-5 p-4">
         <PeriodPicker year={year} month={month} half={half} onYear={setYear} onMonth={setMonth} onHalf={setHalf}
           departments={departments} departmentId={dept} onDepartment={setDept} />
@@ -66,6 +95,7 @@ export default function AdminTimesheet() {
           </div>
         )}
       </Card>
+      <ImportResultModal result={importResult} onClose={() => setImportResult(null)} />
     </div>
   )
 }

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ListChecks, Plus, RefreshCw, CheckCircle2, BadgeDollarSign, Eye } from 'lucide-react'
+import { Download, FileText, ListChecks, Plus, RefreshCw, CheckCircle2, BadgeDollarSign, Eye } from 'lucide-react'
 import { toast } from 'sonner'
 import { timesheetApi } from '@/api/timesheet'
 import { fmtHours } from '@/lib/date'
@@ -45,6 +45,11 @@ export default function AdminSummaryTimesheet() {
     onSuccess: () => { toast.success('Đã tính lại bảng công'); qc.invalidateQueries({ queryKey: ['summary', 'list'] }) },
     onError: handleFinancialError,
   })
+  const exportFile = useMutation({
+    mutationFn: ({ id, format }: { id: string; format: 'excel' | 'pdf' }) => timesheetApi.exportSummary(id, format),
+    onSuccess: (_data, variables) => toast.success(`Đã xuất ${variables.format === 'excel' ? 'Excel' : 'PDF'} bảng công`),
+    onError: (error: Error) => toast.error(error.message),
+  })
 
   function handleFinancialError(error: Error) {
     if (shouldReloadFinancialState(error)) {
@@ -78,6 +83,8 @@ export default function AdminSummaryTimesheet() {
               action={<StatusBadge map={SUMMARY_TS_LABEL} value={st.status} />} />
             <CardBody className="flex flex-wrap items-center gap-2">
               <Button size="sm" variant="secondary" icon={<Eye className="h-4 w-4" />} onClick={() => setView(st)}>Chi tiết</Button>
+              <Button size="sm" variant="secondary" icon={<Download className="h-4 w-4" />} loading={exportFile.isPending} onClick={() => exportFile.mutate({ id: st.id, format: 'excel' })}>Excel</Button>
+              <Button size="sm" variant="secondary" icon={<FileText className="h-4 w-4" />} loading={exportFile.isPending} onClick={() => exportFile.mutate({ id: st.id, format: 'pdf' })}>PDF</Button>
               {st.capabilities.canRebuild && <Button size="sm" variant="secondary" icon={<RefreshCw className="h-4 w-4" />} loading={rebuild.isPending} onClick={() => rebuild.mutate(st)}>Tính lại</Button>}
               {st.capabilities.canConfirmHr && <Button size="sm" variant="success" icon={<CheckCircle2 className="h-4 w-4" />} loading={confirm.isPending} onClick={() => confirm.mutate(st)}>HR xác nhận</Button>}
               {st.capabilities.canTransferPayroll && <Button size="sm" icon={<BadgeDollarSign className="h-4 w-4" />} loading={transfer.isPending} onClick={() => transfer.mutate(st)}>Chuyển sang lương</Button>}

@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { CalendarRange, Wand2 } from 'lucide-react'
+import { CalendarRange, Download, FileSpreadsheet, Upload, Wand2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { shiftsApi } from '@/api/shifts'
 import { orgApi } from '@/api/org'
@@ -8,6 +8,8 @@ import { PageHeader, Card, Spinner, EmptyState, Button, Select, Modal } from '@/
 import { PeriodPicker } from '@/components/admin/widgets'
 import { usePermissions } from '@/hooks/usePermissions'
 import type { Employee } from '@/types'
+import type { BulkImportResult } from '@/api/shifts'
+import { ImportResultModal } from '@/components/admin/ImportResultModal'
 import {
   DEFAULT_WORK_WEEKDAYS,
   filterBulkScheduleDates,
@@ -36,6 +38,8 @@ export default function AdminShiftSchedule() {
   const [selectedWeekdays, setSelectedWeekdays] = useState<Set<number>>(
     () => new Set(DEFAULT_WORK_WEEKDAYS),
   )
+  const importInput = useRef<HTMLInputElement>(null)
+  const [importResult, setImportResult] = useState<BulkImportResult | null>(null)
 
   const { data: departments } = useQuery({ queryKey: ['org', 'departments'], queryFn: () => orgApi.departments() })
   const { data: shifts } = useQuery({ queryKey: ['shifts', 'list'], queryFn: () => shiftsApi.list() })
@@ -72,6 +76,21 @@ export default function AdminShiftSchedule() {
     },
     onError: (e: Error) => toast.error(e.message),
   })
+  const exportExcel = useMutation({
+    mutationFn: () => shiftsApi.exportSchedule({ year, month, departmentId: dept || undefined }),
+    onSuccess: () => toast.success('Đã xuất lịch phân ca Excel'), onError: (error: Error) => toast.error(error.message),
+  })
+  const downloadTemplate = useMutation({
+    mutationFn: () => shiftsApi.downloadScheduleTemplate(), onError: (error: Error) => toast.error(error.message),
+  })
+  const importExcel = useMutation({
+    mutationFn: (file: File) => shiftsApi.importSchedule(file),
+    onSuccess: (result) => {
+      setImportResult(result)
+      if (result.importedCount) { toast.success(`Đã nhập ${result.importedCount} lượt phân ca`); qc.invalidateQueries({ queryKey: ['shifts', 'schedule'] }) }
+    },
+    onError: (error: Error) => toast.error(error.message),
+  })
 
   const toggleEmp = (id: string) => {
     const next = new Set(selected)
@@ -104,7 +123,12 @@ export default function AdminShiftSchedule() {
 
   return (
     <div>
-      <PageHeader title="Phân ca" subtitle="Bảng phân ca nhân viên × ngày trong tháng" />
+      <PageHeader title="Phân ca" subtitle="Bảng phân ca nhân viên × ngày trong tháng" actions={<div className="flex flex-wrap gap-2">
+        <Button variant="secondary" icon={<Download className="h-4 w-4" />} loading={exportExcel.isPending} onClick={() => exportExcel.mutate()}>Xuất Excel</Button>
+        {canManage && <><Button variant="secondary" icon={<FileSpreadsheet className="h-4 w-4" />} loading={downloadTemplate.isPending} onClick={() => downloadTemplate.mutate()}>File mẫu</Button>
+          <Button variant="secondary" icon={<Upload className="h-4 w-4" />} loading={importExcel.isPending} onClick={() => importInput.current?.click()}>Nhập Excel</Button>
+          <input ref={importInput} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) importExcel.mutate(file); event.target.value = '' }} /></>}
+      </div>} />
 
       <Card className="mb-5 p-4">
         <div className="flex flex-wrap items-end justify-between gap-4">
@@ -291,6 +315,7 @@ export default function AdminShiftSchedule() {
           {(shifts ?? []).map((s) => <option key={s.id} value={s.id}>{s.name} ({s.startTime.slice(0, 5)}–{s.endTime.slice(0, 5)})</option>)}
         </Select>
       </Modal>
+      <ImportResultModal result={importResult} onClose={() => setImportResult(null)} />
     </div>
   )
 }

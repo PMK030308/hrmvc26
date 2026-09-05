@@ -1,7 +1,7 @@
 // ============================================================================
 // API — Bảng công chi tiết + tổng hợp (§8) + lương (§8.5) — HTTP.
 // ============================================================================
-import { api } from './http'
+import { api, downloadFile } from './http'
 import type {
   AttendanceRecord, Employee, SummaryTimesheet, Payslip, PayrollSheet,
 } from '@/types'
@@ -28,6 +28,14 @@ export const timesheetApi = {
   transferToPayroll(id: string, expectedVersion: number): Promise<SummaryTimesheet> { return api.post(`/timesheet/transfer-to-payroll/${id}`, { expectedVersion }) },
 
   rebuild(id: string, expectedVersion: number): Promise<SummaryTimesheet> { return api.post(`/timesheet/rebuild/${id}`, { expectedVersion }) },
+
+  exportDetailed(params: { year: number; month: number; half: 1 | 2; departmentId?: string }): Promise<void> {
+    return downloadFile('/timesheet/detailed/export-excel', `bang-cong-${params.year}-${params.month}-${params.half}.xlsx`, params)
+  },
+
+  exportSummary(id: string, format: 'excel' | 'pdf'): Promise<void> {
+    return downloadFile(`/timesheet/summary/${id}/export-${format}`, `bang-cong-tong-hop.${format === 'excel' ? 'xlsx' : 'pdf'}`)
+  },
 }
 
 export const payrollApi = {
@@ -44,4 +52,8 @@ export const payrollApi = {
   approvePayroll(period: string, expectedVersion: number): Promise<{ ok: true; period: string; status: number; version: number }> {
     return api.post(`/payroll/approve-payroll/${period}`, { expectedVersion })
   },
+
+  exportSheet(period: string): Promise<void> { return downloadFile(`/payroll/sheet/${period}/export-excel`, `bang-luong-${period}.xlsx`) },
+
+  exportPayslip(id: string): Promise<void> { return downloadFile(`/payroll/payslip/${id}/export-pdf`, `phieu-luong-${id}.pdf`) },
 }

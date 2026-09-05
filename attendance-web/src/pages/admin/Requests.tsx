@@ -1,11 +1,12 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { FileText, ArrowRight } from 'lucide-react'
+import { FileText, ArrowRight, Download } from 'lucide-react'
+import { toast } from 'sonner'
 import { requestsApi } from '@/api/requests'
 import { REQUEST_TYPE_LABEL, REQUEST_STATUS_LABEL } from '@/constants/enums'
 import { fmtDate } from '@/lib/date'
-import { PageHeader, Card, CardHeader, Spinner, EmptyState, Tabs, Table, Tr, Td, StatusBadge, Avatar } from '@/components/ui'
+import { PageHeader, Card, CardHeader, Spinner, EmptyState, Tabs, Table, Tr, Td, StatusBadge, Avatar, Button } from '@/components/ui'
 import { requestSummary } from '@/components/requests/widgets'
 import type { RequestType } from '@/types'
 
@@ -14,10 +15,15 @@ const TYPES: RequestType[] = ['leaves', 'late-earlies', 'overtimes', 'business-t
 export default function AdminRequests() {
   const [type, setType] = useState<RequestType>('leaves')
   const { data, isLoading } = useQuery({ queryKey: ['requests', 'list', type], queryFn: () => requestsApi.list(type) })
+  const exportExcel = useMutation({
+    mutationFn: () => requestsApi.exportList(type), onSuccess: () => toast.success('Đã xuất danh sách đơn Excel'), onError: (error: Error) => toast.error(error.message),
+  })
 
   return (
     <div>
-      <PageHeader title="Quản lý đơn từ" subtitle="Tất cả đơn theo loại (toàn công ty)" />
+      <PageHeader title="Quản lý đơn từ" subtitle="Tất cả đơn theo loại (toàn công ty)" actions={
+        <Button variant="secondary" icon={<Download className="h-4 w-4" />} loading={exportExcel.isPending} disabled={!data?.length} onClick={() => exportExcel.mutate()}>Xuất Excel</Button>
+      } />
       <Tabs active={type} onChange={(t) => setType(t as RequestType)} tabs={TYPES.map((t) => ({ key: t, label: REQUEST_TYPE_LABEL[t].label, count: undefined }))} />
 
       <Card className="mt-5">

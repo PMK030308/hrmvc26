@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { BarChart3, Download, TrendingUp, Clock3, AlertTriangle, Wallet } from 'lucide-react'
+import { useMutation, useQuery } from '@tanstack/react-query'
+import { BarChart3, Download, FileText, TrendingUp, Clock3, AlertTriangle, Wallet } from 'lucide-react'
 import { toast } from 'sonner'
 import { dashboardApi } from '@/api/dashboard'
 import { ymd, addDays, fmtHours } from '@/lib/date'
@@ -27,21 +27,17 @@ export default function AdminReports() {
   const showNet = data?.projection === 'detail'
   const totalNet = data?.payroll?.totalNet ?? 0
 
-  function exportCsv() {
-    if (rows.length === 0) { toast.error('Chưa có dữ liệu'); return }
-    const out = [['Nhân viên', 'Công hưởng (h)', 'Giờ OT', 'Ngày đi muộn', ...(showNet ? ['Thực lĩnh'] : [])]]
-      .concat(rows.map((r) => [r.name, String(r.paidUnits), String(r.otHours), String(r.late), ...(showNet ? [String(r.net ?? 0)] : [])]))
-    const csv = '﻿' + out.map((r) => r.map((c) => `"${c}"`).join(',')).join('\n')
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a'); a.href = url; a.download = `report-${from}_${to}.csv`; a.click(); URL.revokeObjectURL(url)
-    toast.success('Đã xuất báo cáo CSV')
-  }
+  const exportReport = useMutation({
+    mutationFn: (format: 'excel' | 'pdf') => dashboardApi.exportReport(from, to, format),
+    onSuccess: (_data, format) => toast.success(`Đã xuất báo cáo ${format === 'excel' ? 'Excel' : 'PDF'}`),
+    onError: (error: Error) => toast.error(error.message),
+  })
 
   return (
     <div>
       <PageHeader title="Báo cáo" subtitle="Phân tích chấm công & lương theo khoảng thời gian" actions={
-        <Button variant="secondary" icon={<Download className="h-4 w-4" />} onClick={exportCsv} disabled={rows.length === 0}>Xuất CSV</Button>
+        <div className="flex gap-2"><Button variant="secondary" icon={<Download className="h-4 w-4" />} loading={exportReport.isPending} onClick={() => exportReport.mutate('excel')} disabled={rows.length === 0}>Xuất Excel</Button>
+          <Button variant="secondary" icon={<FileText className="h-4 w-4" />} loading={exportReport.isPending} onClick={() => exportReport.mutate('pdf')} disabled={rows.length === 0}>Xuất PDF</Button></div>
       } />
 
       <Card className="mb-5">

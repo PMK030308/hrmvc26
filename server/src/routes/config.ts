@@ -11,6 +11,7 @@ import {
   getPermissionMatrixSnapshot, replacePermissionMatrix, updateAuthorizationUser, validateGenericPermissionMatrix,
   ALL_ROLES, type PermissionMatrixEntry,
 } from '../services/permissionService.js'
+import { createTabularExcel, XLSX_MIME } from '../services/tabularDocumentService.js'
 import { loadAuthorizationActor } from '../authz/authorizationActor.js'
 
 export const configRouter = Router()
@@ -168,6 +169,30 @@ configRouter.put('/roles/matrix', requireAuth, requirePermission('config.permiss
 
 configRouter.get('/roles/users', requireAuth, requirePermission('config.user.manage'), (_req, res) => {
   res.json((db.prepare('SELECT * FROM users').all() as any[]).map(mapUser))
+})
+
+configRouter.get('/roles/export-excel', requireAuth, requirePermission('config.user.manage'), async (req: AuthedRequest, res, next) => {
+  try {
+    const rows = (db.prepare(`SELECT u.*, e.employee_code, e.full_name FROM users u
+      LEFT JOIN employees e ON e.id=u.employee_id ORDER BY u.email`).all() as any[]).map((row) => ({
+        email: row.email, employeeCode: row.employee_code, employeeName: row.full_name,
+        roles: JSON.parse(row.roles ?? '[]').join(', '), departmentScopes: JSON.parse(row.department_scopes ?? '[]').join(', '),
+        active: row.is_active ? 'Hoạt động' : 'Khóa', authorizationVersion: row.authz_version ?? 1,
+      }))
+    const file = await createTabularExcel({
+      title: 'Danh sách tài khoản và phân quyền', subtitle: `${rows.length} tài khoản`, sheetName: 'Tài khoản', rows,
+      columns: [
+        { header: 'Email', key: 'email', width: 30 }, { header: 'Mã NV', key: 'employeeCode', width: 14 },
+        { header: 'Nhân viên', key: 'employeeName', width: 26 }, { header: 'Vai trò', key: 'roles', width: 28 },
+        { header: 'Phạm vi phòng ban', key: 'departmentScopes', width: 30 }, { header: 'Trạng thái', key: 'active', width: 14 },
+        { header: 'Phiên bản quyền', key: 'authorizationVersion', width: 16, numeric: true },
+      ],
+    })
+    res.setHeader('Content-Type', XLSX_MIME)
+    res.setHeader('Content-Disposition', 'attachment; filename="tai-khoan-phan-quyen.xlsx"')
+    pushAudit(req.user!.id, req.user!.email, 6, 'AuthorizationExport', null, `Xuất ${rows.length} tài khoản`)
+    res.send(file)
+  } catch (error) { next(error) }
 })
 
 configRouter.put('/roles/users/:userId', requireAuth, requirePermission('config.user.manage'), (req: AuthedRequest, res, next) => {

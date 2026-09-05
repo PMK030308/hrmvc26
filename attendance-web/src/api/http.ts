@@ -94,3 +94,22 @@ export const api = {
   put: <T = any>(url: string, body?: any) => http.put<T>(url, body).then((r) => r.data),
   del: <T = any>(url: string) => http.delete<T>(url).then((r) => r.data),
 }
+
+export async function downloadFile(url: string, fallbackName: string, params?: Record<string, unknown>): Promise<void> {
+  const response = await http.get<Blob>(url, { params, responseType: 'blob' })
+  const disposition = String(response.headers['content-disposition'] ?? '')
+  const encodedName = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1]
+  const basicName = /filename="?([^";]+)"?/i.exec(disposition)?.[1]
+  const fileName = encodedName ? decodeURIComponent(encodedName) : (basicName || fallbackName)
+  const objectUrl = URL.createObjectURL(response.data)
+  try {
+    const link = document.createElement('a')
+    link.href = objectUrl
+    link.download = fileName
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+  } finally {
+    URL.revokeObjectURL(objectUrl)
+  }
+}

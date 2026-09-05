@@ -1,7 +1,7 @@
 // ============================================================================
 // API — Chấm công (§14.2 / §14.3 / §14.4) — HTTP.
 // ============================================================================
-import { api } from './http'
+import { api, downloadFile, http } from './http'
 import type {
   PunchSource, PunchResponse, AttendanceToday, AttendanceRecord, AttendancePunch,
   Shift, LeavePlan, AttendanceRegulation, EmployeeDashboard,
@@ -50,4 +50,16 @@ export const attendanceApi = {
   },
 
   dashboard(): Promise<EmployeeDashboard> { return api.get('/attendance/dashboard') },
+
+  downloadImportTemplate(): Promise<void> { return downloadFile('/attendance/import-template', 'mau-du-lieu-cham-cong.xlsx') },
+
+  exportExcel(params: { from: string; to: string; departmentId?: string }): Promise<void> {
+    return downloadFile('/attendance/export-excel', `cham-cong-${params.from}_${params.to}.xlsx`, params)
+  },
+
+  importExcel(file: File): Promise<{ totalRows: number; importedCount: number; errors: Array<{ row: number; field: string; message: string }> }> {
+    return http.post('/attendance/import-excel', file, {
+      headers: { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
+    }).then((response) => response.data)
+  },
 }

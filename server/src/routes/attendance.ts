@@ -1,5 +1,5 @@
 // Attendance routes (§14.2 / §14.3 / §14.4)
-import { Router } from 'express'
+import express, { Router } from 'express'
 import { db } from '../db.js'
 import { requireAuth, requirePermission, type AuthedRequest } from '../middleware/auth.js'
 import { getEmployee, getSchedule, getShift, punchesOfDay, getRecord, mapPunch, mapShift, mapShiftSchedule, mapNotification } from '../repo.js'
@@ -7,13 +7,46 @@ import { pushAudit } from '../helpers.js'
 import { processPunch, proxyPunch } from '../engines/attendance.js'
 import { ymd, nowVn, addDays, endOfMonth, eachDayOfInterval, parseISO, yearsOfService, isoNow } from '../lib/date.js'
 import { loadAuthorizationActor, matchesEffectiveEmployeeScope } from '../authz/authorizationActor.js'
-import { ATTENDANCE_PERMISSIONS, canProxyPunch } from '../authz/attendanceAuthorization.js'
+import { ATTENDANCE_PERMISSIONS, canProxyPunch, canViewAttendance } from '../authz/attendanceAuthorization.js'
 import { authenticateAttendanceDevice, createAttendanceDevice, revokeAttendanceDevice, rotateAttendanceDeviceCredential } from '../services/deviceAuthService.js'
 import { httpError } from '../types.js'
 import { getClientIp } from '../lib/clientIp.js'
 import { createRateLimitMiddleware } from '../middleware/rateLimit.js'
+import {
+  BULK_EXCEL_MAX_BYTES, createAttendanceExport, createAttendanceTemplate, importAttendancePunches,
+} from '../services/bulkExcelService.js'
+import { XLSX_MIME } from '../services/tabularDocumentService.js'
 
 export const attendanceRouter = Router()
+
+attendanceRouter.get('/import-template', requireAuth, requirePermission(ATTENDANCE_PERMISSIONS.PROXY_PUNCH), async (_req, res, next) => {
+  try {
+    const file = await createAttendanceTemplate()
+    res.setHeader('Content-Type', XLSX_MIME)
+    res.setHeader('Content-Disposition', 'attachment; filename="mau-du-lieu-cham-cong.xlsx"')
+    res.send(file)
+  } catch (error) { next(error) }
+})
+
+attendanceRouter.get('/export-excel', requireAuth, async (req: AuthedRequest, res, next) => {
+  try {
+    const from = String(req.query.from ?? ''), to = String(req.query.to ?? '')
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) throw httpError(400, 'Khoảng ngày không hợp lệ.')
+    const file = await createAttendanceExport(req.authorizationActor!, from, to, req.query.departmentId ? String(req.query.departmentId) : undefined)
+    res.setHeader('Content-Type', XLSX_MIME)
+    res.setHeader('Content-Disposition', `attachment; filename="cham-cong-${from}_${to}.xlsx"`)
+    pushAudit(req.user!.id, req.user!.email, 6, 'AttendanceExport', null, `Xuất chấm công ${from} đến ${to}`)
+    res.send(file)
+  } catch (error) { next(error) }
+})
+
+attendanceRouter.post('/import-excel', requireAuth, requirePermission(ATTENDANCE_PERMISSIONS.PROXY_PUNCH),
+  express.raw({ type: XLSX_MIME, limit: BULK_EXCEL_MAX_BYTES }), async (req: AuthedRequest, res, next) => {
+    try {
+      if (!Buffer.isBuffer(req.body)) throw httpError(415, 'Chỉ chấp nhận file Excel định dạng .xlsx.')
+      res.json(await importAttendancePunches(req.body, req.authorizationActor!))
+    } catch (error) { next(error) }
+  })
 
 const devicePunchRateLimit = createRateLimitMiddleware({
   windowMs: Number(process.env.DEVICE_PUNCH_RATE_LIMIT_WINDOW_MS) || 60_000,

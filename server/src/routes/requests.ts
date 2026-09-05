@@ -22,8 +22,17 @@ import { assertAuthorizedAction, loadRequestActor, loadRequestAuthorizationConte
 import { isEligibleShiftSwapPartner, listEligibleShiftSwapPartners } from '../authz/shiftSwapPartnerAuthorization.js'
 import { generateApprovedRequestPdf } from '../services/requestPdfService.js'
 import { createRateLimitMiddleware } from '../middleware/rateLimit.js'
+import { createTabularExcel, XLSX_MIME } from '../services/tabularDocumentService.js'
 
 const VALID_TYPES = ['leaves', 'late-earlies', 'overtimes', 'business-trips', 'shift-swaps', 'attendance-updates']
+const REQUEST_TYPE_NAMES: Record<string, string> = {
+  leaves: 'Nghỉ phép', 'late-earlies': 'Đi muộn / về sớm', overtimes: 'Tăng ca',
+  'business-trips': 'Công tác', 'shift-swaps': 'Đổi ca', 'attendance-updates': 'Cập nhật công',
+}
+const REQUEST_STATUS_NAMES: Record<number, string> = {
+  1: 'Bản nháp', 2: 'Chờ duyệt', 3: 'Đã duyệt', 4: 'Từ chối', 5: 'Đã hủy',
+  6: 'Chờ đồng nghiệp', 7: 'Đồng nghiệp từ chối', 8: 'Chờ phê duyệt', 9: 'Cần xem xét', 10: 'Mất hiệu lực', 11: 'Áp dụng lỗi',
+}
 
 export const requestsRouter = Router()
 const requestPdfRateLimit = createRateLimitMiddleware({
@@ -111,6 +120,42 @@ requestsRouter.get('/:type/:id/export-pdf', requireAuth, requestPdfRateLimit, as
     pushAudit(req.user!.id, req.user!.email, 1, 'RequestPdfExport', req.params.id,
       `Xuất PDF đơn đã duyệt; verification=${pdf.verificationCode}`)
     res.send(pdf.buffer)
+  } catch (error) { next(error) }
+})
+
+requestsRouter.get('/:type/export-excel', requireAuth, async (req: AuthedRequest, res, next) => {
+  try {
+    const type = req.params.type
+    if (!VALID_TYPES.includes(type)) throw httpError(404, 'Không tìm thấy loại đơn.')
+    const actor = loadRequestActor(req.user!.id)
+    const rows = (db.prepare('SELECT * FROM requests WHERE type=? ORDER BY created_at DESC').all(type) as any[])
+      .filter((row) => {
+        const context = loadRequestAuthorizationContext(type, row.id)
+        return !!context && canViewRequest(actor, context)
+      }).map((row) => ({
+        employeeCode: row.employee_code, employeeName: row.employee_name,
+        type: REQUEST_TYPE_NAMES[type], status: REQUEST_STATUS_NAMES[row.status] ?? row.status,
+        currentLevel: row.current_level, createdAt: row.created_at, updatedAt: row.updated_at,
+        from: row.start_date ?? row.request_date ?? row.ot_date ?? '', to: row.end_date ?? '',
+        hoursDays: row.total_days ?? row.total_hours ?? row.minutes ?? '',
+        detail: row.leave_type_name ?? row.location ?? row.suggested_swap_partner_name ?? row.requested_time ?? '',
+        reason: row.reason ?? row.purpose ?? '',
+      }))
+    const file = await createTabularExcel({
+      title: `Danh sách đơn ${REQUEST_TYPE_NAMES[type]}`, subtitle: `${rows.length} đơn`, sheetName: 'Đơn từ', rows,
+      columns: [
+        { header: 'Mã NV', key: 'employeeCode', width: 14 }, { header: 'Họ tên', key: 'employeeName', width: 26 },
+        { header: 'Loại đơn', key: 'type', width: 20 }, { header: 'Trạng thái', key: 'status', width: 18 },
+        { header: 'Cấp duyệt', key: 'currentLevel', width: 12, numeric: true }, { header: 'Từ ngày', key: 'from', width: 18 },
+        { header: 'Đến ngày', key: 'to', width: 14 }, { header: 'Ngày/Giờ/Phút', key: 'hoursDays', width: 16, numeric: true },
+        { header: 'Chi tiết', key: 'detail', width: 24 }, { header: 'Lý do', key: 'reason', width: 32 },
+        { header: 'Ngày gửi', key: 'createdAt', width: 22 }, { header: 'Cập nhật', key: 'updatedAt', width: 22 },
+      ],
+    })
+    res.setHeader('Content-Type', XLSX_MIME)
+    res.setHeader('Content-Disposition', `attachment; filename="danh-sach-don-${type}.xlsx"`)
+    pushAudit(req.user!.id, req.user!.email, 6, 'RequestExport', null, `Xuất Excel ${rows.length} đơn ${type}`)
+    res.send(file)
   } catch (error) { next(error) }
 })
 

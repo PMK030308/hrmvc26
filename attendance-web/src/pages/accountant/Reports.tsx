@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { BarChart3, Download, TrendingDown, TrendingUp, Wallet } from 'lucide-react'
 import { toast } from 'sonner'
 import { payrollApi } from '@/api/timesheet'
@@ -36,25 +36,14 @@ export default function AccountantReports() {
     return [...map.entries()].sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
   }, [payslips])
 
-  function exportCsv() {
-    if (payslips.length === 0) { toast.error('Chưa có dữ liệu'); return }
-    const out = [['Nhân viên', 'Cơ bản', 'Công hưởng', 'OT', 'Phụ cấp', 'Bảo hiểm', 'Thuế', 'Khấu trừ', 'Thực lĩnh']]
-      .concat(payslips.map((p) => {
-        const ins = p.components.find((c) => c.type === 7)?.amount ?? 0
-        const tax = p.components.find((c) => c.type === 8)?.amount ?? 0
-        return [p.employeeName, String(p.baseSalary), String(p.paidWork), String(p.overtime), String(p.allowance), String(ins), String(tax), String(p.deductions), String(p.net)]
-      }))
-    const csv = '﻿' + out.map((r) => r.map((c) => `"${c}"`).join(',')).join('\n')
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a'); a.href = url; a.download = `finance-${active}.csv`; a.click(); URL.revokeObjectURL(url)
-    toast.success('Đã xuất CSV')
-  }
+  const exportExcel = useMutation({
+    mutationFn: () => payrollApi.exportSheet(active), onSuccess: () => toast.success('Đã xuất báo cáo tài chính Excel'), onError: (error: Error) => toast.error(error.message),
+  })
 
   return (
     <div>
       <PageHeader title="Báo cáo tài chính" subtitle="Tổng hợp khoản lương & khấu trừ theo kỳ" actions={
-        <Button variant="secondary" icon={<Download className="h-4 w-4" />} onClick={exportCsv} disabled={!payslips.length}>Xuất CSV</Button>
+        <Button variant="secondary" icon={<Download className="h-4 w-4" />} loading={exportExcel.isPending} onClick={() => exportExcel.mutate()} disabled={!payslips.length}>Xuất Excel</Button>
       } />
 
       <Card className="mb-5 p-4">

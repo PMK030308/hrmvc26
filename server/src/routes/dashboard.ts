@@ -8,6 +8,8 @@ import {
   canViewAttendanceReportEmployee, canViewAttendanceReports, reportProjectionFor, REPORT_PERMISSIONS,
 } from '../authz/reportAuthorization.js'
 import { parseIsoDate, parsePeriod } from '../services/timesheetService.js'
+import { createTabularExcel, createTabularPdf, PDF_MIME, XLSX_MIME } from '../services/tabularDocumentService.js'
+import { pushAudit } from '../helpers.js'
 
 export const dashboardRouter = Router()
 
@@ -27,6 +29,65 @@ function validateRange(req: AuthedRequest, defaults?: { from: string; to: string
   if (from > to) throw httpError(400, 'Khoảng ngày không hợp lệ.')
   return { from, to }
 }
+
+function buildReportDocument(req: AuthedRequest) {
+  requireAttendanceReport(req)
+  const { from, to } = validateRange(req)
+  const employees = employeesForReport(req)
+  const employeeIds = new Set(employees.map((employee) => employee.id))
+  const records = (db.prepare('SELECT * FROM attendance_records WHERE date>=? AND date<=?').all(from, to) as any[])
+    .filter((record) => employeeIds.has(record.employee_id))
+  const payslips = db.prepare(`SELECT payslip.* FROM payslips payslip
+    JOIN summary_timesheets summary ON summary.period=payslip.period
+    WHERE summary.from_date<=? AND summary.to_date>=?`).all(to, from) as any[]
+  const projection = reportProjectionFor(req.authorizationActor!)
+  const rows = employees.map((employee) => {
+    const employeeRecords = records.filter((record) => record.employee_id === employee.id)
+    return {
+      employeeCode: employee.employee_code, employeeName: employee.full_name,
+      paidUnits: employeeRecords.reduce((sum, record) => sum + (record.status === 4 ? 0 : record.work_hours), 0),
+      overtimeHours: employeeRecords.reduce((sum, record) => sum + record.overtime_hours, 0),
+      lateCount: employeeRecords.filter((record) => record.late_minutes > 0).length,
+      net: projection === 'detail' ? payslips.filter((payslip) => payslip.employee_id === employee.id).reduce((sum, payslip) => sum + payslip.net, 0) : undefined,
+    }
+  })
+  const totalNet = projection === 'attendance' ? null : payslips.reduce((sum, payslip) => sum + payslip.net, 0)
+  return {
+    title: 'Báo cáo chấm công và lương',
+    subtitle: `${from} đến ${to} · ${rows.length} nhân viên${totalNet === null ? '' : ` · Tổng thực lĩnh ${new Intl.NumberFormat('vi-VN').format(totalNet)} VNĐ`}`,
+    sheetName: 'Báo cáo', rows,
+    columns: [
+      { header: 'Mã NV', key: 'employeeCode', width: 14 }, { header: 'Họ tên', key: 'employeeName', width: 28 },
+      { header: 'Công hưởng', key: 'paidUnits', width: 16, numeric: true }, { header: 'Giờ OT', key: 'overtimeHours', width: 14, numeric: true },
+      { header: 'Số ngày muộn', key: 'lateCount', width: 16, numeric: true },
+      ...(projection === 'detail' ? [{ header: 'Thực lĩnh', key: 'net', width: 18, numeric: true }] : []),
+    ],
+  }
+}
+
+dashboardRouter.get('/director-reports/export-excel', requireAuth, async (req: AuthedRequest, res, next) => {
+  try {
+    const document = buildReportDocument(req)
+    const file = await createTabularExcel(document)
+    const { from, to } = validateRange(req)
+    res.setHeader('Content-Type', XLSX_MIME)
+    res.setHeader('Content-Disposition', `attachment; filename="bao-cao-${from}_${to}.xlsx"`)
+    pushAudit(req.user!.id, req.user!.email, 6, 'ReportExport', null, `Xuất Excel báo cáo ${from} đến ${to}`)
+    res.send(file)
+  } catch (error) { next(error) }
+})
+
+dashboardRouter.get('/director-reports/export-pdf', requireAuth, async (req: AuthedRequest, res, next) => {
+  try {
+    const document = buildReportDocument(req)
+    const file = await createTabularPdf(document)
+    const { from, to } = validateRange(req)
+    res.setHeader('Content-Type', PDF_MIME)
+    res.setHeader('Content-Disposition', `attachment; filename="bao-cao-${from}_${to}.pdf"`)
+    pushAudit(req.user!.id, req.user!.email, 6, 'ReportExport', null, `Xuất PDF báo cáo ${from} đến ${to}`)
+    res.send(file)
+  } catch (error) { next(error) }
+})
 
 dashboardRouter.get('/admin', requireAuth, (req: AuthedRequest, res, next) => {
   try {
