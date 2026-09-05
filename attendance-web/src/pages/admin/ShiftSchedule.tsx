@@ -46,6 +46,9 @@ export default function AdminShiftSchedule() {
   const { data, isLoading } = useQuery({
     queryKey: ['shifts', 'schedule', year, month, dept],
     queryFn: () => shiftsApi.schedule({ year, month, departmentId: dept || undefined }),
+    // Auto-refresh để nhiều máy cùng xem thấy phân ca mới (dữ liệu chung qua backend deploy).
+    refetchInterval: 10_000,
+    refetchOnWindowFocus: true,
   })
 
   const shiftMap = useMemo(() => new Map((shifts ?? []).map((s) => [s.id, s])), [shifts])
